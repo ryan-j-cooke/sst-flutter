@@ -651,23 +651,23 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
     });
   }
 
-  void _handleSpeechTranscribed(String transcribedText, int percentage) {
+  /// Handle partial results during transcription (real-time updates)
+  void _handleResult(String partialText) {
+    setState(() {
+      _transcription = partialText;
+      _statusMessage = 'Transcribing...';
+    });
+  }
+
+  /// Handle completed transcription with similarity percentage
+  void _handleTranscriptionCompleted(String transcribedText, int percentage) {
     setState(() {
       _transcription = transcribedText;
-      // Only show "complete" status for final results (percentage > 0)
-      // Partial results (percentage == 0) are just updates
-      if (percentage > 0) {
-        _statusMessage = 'Transcription complete (${percentage}% match)';
-      } else {
-        _statusMessage = 'Transcribing...';
-      }
+      _statusMessage = 'Transcription complete (${percentage}% match)';
     });
 
-    // Only automatically speak the transcribed text for final results
-    // Partial results (percentage == 0) are just UI updates, don't trigger TTS
-    if (percentage > 0) {
-      _speakText(transcribedText);
-    }
+    // Always auto-play TTS when transcription completes
+    _speakText(transcribedText);
   }
 
   @override
@@ -977,6 +977,41 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
                       ],
                     ),
                   ),
+                const SizedBox(height: 10),
+
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12.0,
+                    vertical: 8.0,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[100],
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.grey[300]!),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const SizedBox(height: 6),
+                      Text(
+                        'Model Used:',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[700],
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                      Text(
+                        selectedModel?.displayName ?? 'na',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[700],
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
                 const SizedBox(height: 20),
                 // STT Button
                 if ((selectedModel != null ||
@@ -1002,7 +1037,9 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
                           languageCode: selectedLang?.code ?? 'en',
                           sherpaModel: selectedModel,
                           customModelName: selectedCustomModelName,
-                          onSpeechTranscribed: _handleSpeechTranscribed,
+                          onResult: _handleResult,
+                          onTranscriptionCompleted:
+                              _handleTranscriptionCompleted,
                           label: 'Press to speak',
                         ),
                       );
