@@ -59,7 +59,7 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
   List<int>? tarBz2Bytes;
   List<int>? tarBytes;
   Archive? archive;
-  
+
   try {
     final tarBz2Path = params['tarBz2Path'] as String;
     final modelDir = params['modelDir'] as String;
@@ -70,12 +70,14 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
     // Read the tar.bz2 file in chunks to reduce peak memory
     final tarBz2File = File(tarBz2Path);
     final fileSize = await tarBz2File.length();
-    
+
     // For very large files, warn about memory usage
-    if (fileSize > 500 * 1024 * 1024) { // > 500MB
+    if (fileSize > 500 * 1024 * 1024) {
+      // > 500MB
       sendPort.send({
         'status': 'warning',
-        'message': 'Large file detected (${(fileSize / 1024 / 1024).toStringAsFixed(1)} MB). Extraction may use significant memory.',
+        'message':
+            'Large file detected (${(fileSize / 1024 / 1024).toStringAsFixed(1)} MB). Extraction may use significant memory.',
       });
     }
 
@@ -91,13 +93,13 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
     sendPort.send({'status': 'decompressing', 'progress': 15.0});
     final bz2Decoder = BZip2Decoder();
     tarBytes = bz2Decoder.decodeBytes(tarBz2Bytes);
-    
+
     // Clear compressed bytes from memory immediately after decompression
     tarBz2Bytes = null;
-    
+
     // Force garbage collection hint (Dart VM will handle this)
     // Note: Dart doesn't have explicit GC, but clearing references helps
-    
+
     sendPort.send({
       'status': 'decompressed',
       'progress': 40.0,
@@ -108,10 +110,10 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
     sendPort.send({'status': 'decoding', 'progress': 45.0});
     final tarDecoder = TarDecoder();
     archive = tarDecoder.decodeBytes(tarBytes);
-    
+
     // Clear tar bytes from memory after decoding
     tarBytes = null;
-    
+
     sendPort.send({
       'status': 'decoded',
       'progress': 50.0,
@@ -161,7 +163,7 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
       final outputFile = File('$modelDir/$relativePath');
       try {
         await outputFile.parent.create(recursive: true);
-        
+
         // Write file content
         final content = file.content;
         if (content is List<int>) {
@@ -169,7 +171,7 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
         } else if (content is Uint8List) {
           await outputFile.writeAsBytes(content);
         }
-        
+
         // Log all extracted files for debugging
         sendPort.send({
           'status': 'extracting',
@@ -181,7 +183,7 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
           'extractedFileName': relativePath,
           'logFile': true,
         });
-        
+
         // Clear file content reference after writing (help GC)
         // Note: file.content is still in memory in the archive, but we've written it
       } catch (e) {
@@ -202,7 +204,7 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
     tarBz2Bytes = null;
     tarBytes = null;
     archive = null;
-    
+
     sendPort.send({
       'error': 'Extraction failed: $e',
       'stackTrace': stackTrace.toString(),
@@ -224,8 +226,7 @@ class SherpaOnnxSTTHelper {
     try {
       print('[sherpa-onxx-sst] modelExistsByName: Checking model=$modelName');
       final documentsDir = await getApplicationDocumentsDirectory();
-      final modelDir =
-          '${documentsDir.path}/sherpa_onnx_models/$modelName';
+      final modelDir = '${documentsDir.path}/sherpa_onnx_models/$modelName';
       print('[sherpa-onxx-sst] modelExistsByName: Model directory=$modelDir');
 
       final encoderFile = File('$modelDir/encoder.onnx');
@@ -237,20 +238,27 @@ class SherpaOnnxSTTHelper {
       final decoderExists = await decoderFile.exists();
       final joinerExists = await joinerFile.exists();
       final tokensExists = await tokensFile.exists();
-      
-      print('[sherpa-onxx-sst] modelExistsByName: encoderExists=$encoderExists');
-      print('[sherpa-onxx-sst] modelExistsByName: decoderExists=$decoderExists');
+
+      print(
+        '[sherpa-onxx-sst] modelExistsByName: encoderExists=$encoderExists',
+      );
+      print(
+        '[sherpa-onxx-sst] modelExistsByName: decoderExists=$decoderExists',
+      );
       print('[sherpa-onxx-sst] modelExistsByName: joinerExists=$joinerExists');
       print('[sherpa-onxx-sst] modelExistsByName: tokensExists=$tokensExists');
-      
+
       // Determine if this is a Whisper model (no joiner required)
       final isWhisperModel = modelName.contains('whisper');
-      print('[sherpa-onxx-sst] modelExistsByName: Is Whisper model: $isWhisperModel');
-      
+      print(
+        '[sherpa-onxx-sst] modelExistsByName: Is Whisper model: $isWhisperModel',
+      );
+
       // For Whisper models, joiner is not required
-      final allExist = encoderExists && 
-          decoderExists && 
-          tokensExists && 
+      final allExist =
+          encoderExists &&
+          decoderExists &&
+          tokensExists &&
           (isWhisperModel || joinerExists);
       print('[sherpa-onxx-sst] modelExistsByName: Result=$allExist');
       return allExist;
@@ -271,12 +279,15 @@ class SherpaOnnxSTTHelper {
   ///
   /// Returns the model directory path
   static Future<String> ensureModelExistsByName(String modelName) async {
-    print('[sherpa-onxx-sst] ensureModelExistsByName: Starting for model=$modelName');
+    print(
+      '[sherpa-onxx-sst] ensureModelExistsByName: Starting for model=$modelName',
+    );
     // Get model directory
     final documentsDir = await getApplicationDocumentsDirectory();
-    final modelDir =
-        '${documentsDir.path}/sherpa_onnx_models/$modelName';
-    print('[sherpa-onxx-sst] ensureModelExistsByName: Model directory=$modelDir');
+    final modelDir = '${documentsDir.path}/sherpa_onnx_models/$modelName';
+    print(
+      '[sherpa-onxx-sst] ensureModelExistsByName: Model directory=$modelDir',
+    );
     await Directory(modelDir).create(recursive: true);
 
     // Check if model files already exist
@@ -289,18 +300,25 @@ class SherpaOnnxSTTHelper {
     final decoderExists = await decoderFile.exists();
     final joinerExists = await joinerFile.exists();
     final tokensExists = await tokensFile.exists();
-    
+
     // Determine if this is a Whisper model (no joiner required)
     final isWhisperModel = modelName.contains('whisper');
-    print('[sherpa-onxx-sst] ensureModelExistsByName: Is Whisper model: $isWhisperModel');
-    
+    print(
+      '[sherpa-onxx-sst] ensureModelExistsByName: Is Whisper model: $isWhisperModel',
+    );
+
     // For Whisper models, joiner is not required
-    final modelExists = encoderExists && 
-        decoderExists && 
-        tokensExists && 
+    final modelExists =
+        encoderExists &&
+        decoderExists &&
+        tokensExists &&
         (isWhisperModel || joinerExists);
-    print('[sherpa-onxx-sst] ensureModelExistsByName: Model files exist=$modelExists');
-    print('[sherpa-onxx-sst] ensureModelExistsByName: encoderExists=$encoderExists, decoderExists=$decoderExists, joinerExists=$joinerExists, tokensExists=$tokensExists');
+    print(
+      '[sherpa-onxx-sst] ensureModelExistsByName: Model files exist=$modelExists',
+    );
+    print(
+      '[sherpa-onxx-sst] ensureModelExistsByName: encoderExists=$encoderExists, decoderExists=$decoderExists, joinerExists=$joinerExists, tokensExists=$tokensExists',
+    );
 
     if (!modelExists) {
       // Model doesn't exist, check if downloaded file exists
@@ -322,9 +340,7 @@ class SherpaOnnxSTTHelper {
             // Size doesn't match, re-download
             await downloadedFile.delete();
             await _downloadModelByName(modelName);
-            final redownloadedFile = File(
-              '${tempDir.path}/$modelName.tar.bz2',
-            );
+            final redownloadedFile = File('${tempDir.path}/$modelName.tar.bz2');
             await _extractModel(redownloadedFile, modelDir, modelName);
           }
         } catch (e) {
@@ -333,18 +349,14 @@ class SherpaOnnxSTTHelper {
             await downloadedFile.delete();
           }
           await _downloadModelByName(modelName);
-          final redownloadedFile = File(
-            '${tempDir.path}/$modelName.tar.bz2',
-          );
+          final redownloadedFile = File('${tempDir.path}/$modelName.tar.bz2');
           await _extractModel(redownloadedFile, modelDir, modelName);
         }
       } else {
         // No downloaded file, download it
         await _downloadModelByName(modelName);
         final tempDir2 = await getTemporaryDirectory();
-        final downloadedFile2 = File(
-          '${tempDir2.path}/$modelName.tar.bz2',
-        );
+        final downloadedFile2 = File('${tempDir2.path}/$modelName.tar.bz2');
         await _extractModel(downloadedFile2, modelDir, modelName);
       }
     }
@@ -359,7 +371,10 @@ class SherpaOnnxSTTHelper {
   static Future<OfflineRecognizer> initializeRecognizer(
     SherpaModelType model,
   ) async {
-    return initializeRecognizerByName(model.modelName, displayName: model.displayName);
+    return initializeRecognizerByName(
+      model.modelName,
+      displayName: model.displayName,
+    );
   }
 
   /// Initialize Sherpa-ONNX recognizer (using model name string)
@@ -370,11 +385,15 @@ class SherpaOnnxSTTHelper {
     String modelName, {
     String? displayName,
   }) async {
-    print('[sherpa-onxx-sst] initializeRecognizerByName: Starting for model=${displayName ?? modelName} ($modelName)');
-    
+    print(
+      '[sherpa-onxx-sst] initializeRecognizerByName: Starting for model=${displayName ?? modelName} ($modelName)',
+    );
+
     // Ensure model exists (download/extract if needed) - this is already async
     final modelDir = await ensureModelExistsByName(modelName);
-    print('[sherpa-onxx-sst] initializeRecognizerByName: Model directory=$modelDir');
+    print(
+      '[sherpa-onxx-sst] initializeRecognizerByName: Model directory=$modelDir',
+    );
 
     // Initialize Sherpa-ONNX recognizer
     final encoderPath = '$modelDir/encoder.onnx';
@@ -383,10 +402,18 @@ class SherpaOnnxSTTHelper {
     final tokensPath = '$modelDir/tokens.txt';
 
     print('[sherpa-onxx-sst] initializeRecognizerByName: Checking files...');
-    print('[sherpa-onxx-sst] initializeRecognizerByName: encoderPath=$encoderPath');
-    print('[sherpa-onxx-sst] initializeRecognizerByName: decoderPath=$decoderPath');
-    print('[sherpa-onxx-sst] initializeRecognizerByName: joinerPath=$joinerPath');
-    print('[sherpa-onxx-sst] initializeRecognizerByName: tokensPath=$tokensPath');
+    print(
+      '[sherpa-onxx-sst] initializeRecognizerByName: encoderPath=$encoderPath',
+    );
+    print(
+      '[sherpa-onxx-sst] initializeRecognizerByName: decoderPath=$decoderPath',
+    );
+    print(
+      '[sherpa-onxx-sst] initializeRecognizerByName: joinerPath=$joinerPath',
+    );
+    print(
+      '[sherpa-onxx-sst] initializeRecognizerByName: tokensPath=$tokensPath',
+    );
 
     // Perform file existence checks in an isolate to avoid blocking UI
     final fileCheckResult = await _checkModelFilesInIsolate(
@@ -395,32 +422,45 @@ class SherpaOnnxSTTHelper {
       joinerPath,
       tokensPath,
     );
-    
-    print('[sherpa-onxx-sst] initializeRecognizerByName: encoderExists=${fileCheckResult['encoderExists']}');
-    print('[sherpa-onxx-sst] initializeRecognizerByName: decoderExists=${fileCheckResult['decoderExists']}');
-    print('[sherpa-onxx-sst] initializeRecognizerByName: joinerExists=${fileCheckResult['joinerExists']}');
-    print('[sherpa-onxx-sst] initializeRecognizerByName: tokensExists=${fileCheckResult['tokensExists']}');
+
+    print(
+      '[sherpa-onxx-sst] initializeRecognizerByName: encoderExists=${fileCheckResult['encoderExists']}',
+    );
+    print(
+      '[sherpa-onxx-sst] initializeRecognizerByName: decoderExists=${fileCheckResult['decoderExists']}',
+    );
+    print(
+      '[sherpa-onxx-sst] initializeRecognizerByName: joinerExists=${fileCheckResult['joinerExists']}',
+    );
+    print(
+      '[sherpa-onxx-sst] initializeRecognizerByName: tokensExists=${fileCheckResult['tokensExists']}',
+    );
 
     // Determine if this is a Whisper model (no joiner required)
     final isWhisperModel = modelName.contains('whisper');
-    
+
     // For Whisper models, joiner is not required
-    final requiredFilesExist = fileCheckResult['encoderExists']! &&
+    final requiredFilesExist =
+        fileCheckResult['encoderExists']! &&
         fileCheckResult['decoderExists']! &&
         fileCheckResult['tokensExists']! &&
         (isWhisperModel || fileCheckResult['joinerExists']!);
 
     if (!requiredFilesExist) {
-      print('[sherpa-onxx-sst] initializeRecognizerByName: ERROR - Model files missing!');
+      print(
+        '[sherpa-onxx-sst] initializeRecognizerByName: ERROR - Model files missing!',
+      );
       throw Exception('Model files missing');
     }
 
     // Yield control to UI thread to allow loading indicator to show
     // Use a small delay to ensure UI has time to update
     await Future.delayed(const Duration(milliseconds: 50));
-    
-    print('[sherpa-onxx-sst] initializeRecognizerByName: All files exist, creating recognizer config...');
-    
+
+    print(
+      '[sherpa-onxx-sst] initializeRecognizerByName: All files exist, creating recognizer config...',
+    );
+
     // Use Whisper config for Whisper models, Transducer config for others
     final modelConfig = isWhisperModel
         ? OfflineModelConfig(
@@ -441,7 +481,7 @@ class SherpaOnnxSTTHelper {
             ),
             tokens: tokensPath,
           );
-    
+
     final recognizerConfig = OfflineRecognizerConfig(
       model: modelConfig,
       feat: FeatureConfig(sampleRate: 16000),
@@ -450,12 +490,16 @@ class SherpaOnnxSTTHelper {
     // Yield control again before creating recognizer (this is the heavy operation)
     // This allows the UI to show the loading state before blocking
     await Future.delayed(const Duration(milliseconds: 50));
-    
-    print('[sherpa-onxx-sst] initializeRecognizerByName: Creating OfflineRecognizer...');
+
+    print(
+      '[sherpa-onxx-sst] initializeRecognizerByName: Creating OfflineRecognizer...',
+    );
     // Note: OfflineRecognizer creation must happen on main thread (native object)
     // This is the blocking operation, but we've already shown loading state
     final recognizer = OfflineRecognizer(recognizerConfig);
-    print('[sherpa-onxx-sst] initializeRecognizerByName: Recognizer created successfully');
+    print(
+      '[sherpa-onxx-sst] initializeRecognizerByName: Recognizer created successfully',
+    );
     return recognizer;
   }
 
@@ -467,7 +511,7 @@ class SherpaOnnxSTTHelper {
     String tokensPath,
   ) async {
     final receivePort = ReceivePort();
-    
+
     await Isolate.spawn(_checkModelFilesIsolate, {
       'sendPort': receivePort.sendPort,
       'encoderPath': encoderPath,
@@ -475,7 +519,7 @@ class SherpaOnnxSTTHelper {
       'joinerPath': joinerPath,
       'tokensPath': tokensPath,
     });
-    
+
     final result = await receivePort.first as Map<String, bool>;
     return result;
   }
@@ -487,13 +531,13 @@ class SherpaOnnxSTTHelper {
     final decoderPath = message['decoderPath'] as String;
     final joinerPath = message['joinerPath'] as String;
     final tokensPath = message['tokensPath'] as String;
-    
+
     try {
       final encoderExists = File(encoderPath).existsSync();
       final decoderExists = File(decoderPath).existsSync();
       final joinerExists = File(joinerPath).existsSync();
       final tokensExists = File(tokensPath).existsSync();
-      
+
       sendPort.send({
         'encoderExists': encoderExists,
         'decoderExists': decoderExists,
@@ -522,8 +566,10 @@ class SherpaOnnxSTTHelper {
   }) async {
     print('[sherpa-onxx-sst] transcribeAudio: Starting transcription');
     print('[sherpa-onxx-sst] transcribeAudio: audioPath=$audioPath');
-    print('[sherpa-onxx-sst] transcribeAudio: onPartialResult provided=${onPartialResult != null}');
-    
+    print(
+      '[sherpa-onxx-sst] transcribeAudio: onPartialResult provided=${onPartialResult != null}',
+    );
+
     final audioFile = File(audioPath);
     if (!await audioFile.exists()) {
       throw Exception('Audio file not found: $audioPath');
@@ -536,45 +582,55 @@ class SherpaOnnxSTTHelper {
     try {
       // Read audio file and feed to recognizer
       final audioBytes = await audioFile.readAsBytes();
-      print('[sherpa-onxx-sst] transcribeAudio: Audio file read, size=${audioBytes.length} bytes');
+      print(
+        '[sherpa-onxx-sst] transcribeAudio: Audio file read, size=${audioBytes.length} bytes',
+      );
 
       // Process audio in chunks (16kHz, 16-bit, mono = 32000 bytes per second)
       // 100ms chunks = 3200 bytes per chunk
       const chunkSize = 3200; // 100ms chunks
       final totalChunks = (audioBytes.length / chunkSize).ceil();
-      print('[sherpa-onxx-sst] transcribeAudio: Processing $totalChunks chunks');
-      
+      print(
+        '[sherpa-onxx-sst] transcribeAudio: Processing $totalChunks chunks',
+      );
+
       int chunkCount = 0;
       for (int i = 0; i < audioBytes.length; i += chunkSize) {
         final end = (i + chunkSize < audioBytes.length)
             ? i + chunkSize
             : audioBytes.length;
         final chunk = audioBytes.sublist(i, end);
-        
+
         stream.acceptWaveform(
           samples: _bytesToSamples(chunk),
           sampleRate: 16000,
         );
-        
+
         chunkCount++;
-        
+
         // Get partial results periodically (every 10 chunks = ~1 second of audio)
         if (onPartialResult != null && chunkCount % 10 == 0) {
           try {
             recognizer.decode(stream);
             final partialResult = recognizer.getResult(stream);
             if (partialResult.text.isNotEmpty) {
-              print('[sherpa-onxx-sst] transcribeAudio: Partial result: "${partialResult.text}"');
+              print(
+                '[sherpa-onxx-sst] transcribeAudio: Partial result: "${partialResult.text}"',
+              );
               onPartialResult(partialResult.text);
             }
           } catch (e) {
             // Ignore errors for partial results
-            print('[sherpa-onxx-sst] transcribeAudio: Error getting partial result: $e');
+            print(
+              '[sherpa-onxx-sst] transcribeAudio: Error getting partial result: $e',
+            );
           }
         }
       }
 
-      print('[sherpa-onxx-sst] transcribeAudio: All chunks processed, getting final result...');
+      print(
+        '[sherpa-onxx-sst] transcribeAudio: All chunks processed, getting final result...',
+      );
       // Input finished, decode and get final result
       recognizer.decode(stream);
       final result = recognizer.getResult(stream);
@@ -662,10 +718,16 @@ class SherpaOnnxSTTHelper {
     void Function(double progress, String status)? onExtractionProgress,
     CancellationToken? cancelToken,
   }) async {
-    print('[sherpa-onxx-sst] downloadModelByName: ========== Starting download process ==========');
-    print('[sherpa-onxx-sst] downloadModelByName: Model=${displayName ?? modelName} ($modelName)');
-    print('[sherpa-onxx-sst] downloadModelByName: Model directory (destination for extracted files)=$modelDir');
-    
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: ========== Starting download process ==========',
+    );
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: Model=${displayName ?? modelName} ($modelName)',
+    );
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: Model directory (destination for extracted files)=$modelDir',
+    );
+
     final modelUrl =
         'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/$modelName.tar.bz2';
     print('[sherpa-onxx-sst] downloadModelByName: Model URL=$modelUrl');
@@ -676,36 +738,63 @@ class SherpaOnnxSTTHelper {
     final joinerFile = File('$modelDir/joiner.onnx');
     final tokensFile = File('$modelDir/tokens.txt');
 
-    print('[sherpa-onxx-sst] downloadModelByName: Checking model files existence...');
-    print('[sherpa-onxx-sst] downloadModelByName: - encoder.onnx: ${encoderFile.path}');
-    print('[sherpa-onxx-sst] downloadModelByName: - decoder.onnx: ${decoderFile.path}');
-    print('[sherpa-onxx-sst] downloadModelByName: - joiner.onnx: ${joinerFile.path}');
-    print('[sherpa-onxx-sst] downloadModelByName: - tokens.txt: ${tokensFile.path}');
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: Checking model files existence...',
+    );
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: - encoder.onnx: ${encoderFile.path}',
+    );
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: - decoder.onnx: ${decoderFile.path}',
+    );
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: - joiner.onnx: ${joinerFile.path}',
+    );
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: - tokens.txt: ${tokensFile.path}',
+    );
 
     final encoderExists = await encoderFile.exists();
     final decoderExists = await decoderFile.exists();
     final joinerExists = await joinerFile.exists();
     final tokensExists = await tokensFile.exists();
 
-    print('[sherpa-onxx-sst] downloadModelByName: File existence check results:');
-    print('[sherpa-onxx-sst] downloadModelByName: - encoder.onnx exists: $encoderExists');
-    print('[sherpa-onxx-sst] downloadModelByName: - decoder.onnx exists: $decoderExists');
-    print('[sherpa-onxx-sst] downloadModelByName: - joiner.onnx exists: $joinerExists');
-    print('[sherpa-onxx-sst] downloadModelByName: - tokens.txt exists: $tokensExists');
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: File existence check results:',
+    );
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: - encoder.onnx exists: $encoderExists',
+    );
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: - decoder.onnx exists: $decoderExists',
+    );
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: - joiner.onnx exists: $joinerExists',
+    );
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: - tokens.txt exists: $tokensExists',
+    );
 
     // Determine if this is a Whisper model (no joiner required)
     final isWhisperModel = modelName.contains('whisper');
-    print('[sherpa-onxx-sst] downloadModelByName: Is Whisper model: $isWhisperModel');
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: Is Whisper model: $isWhisperModel',
+    );
 
     // For Whisper models, joiner is not required
-    final modelFilesExist = encoderExists &&
+    final modelFilesExist =
+        encoderExists &&
         decoderExists &&
         tokensExists &&
         (isWhisperModel || joinerExists);
 
     if (modelFilesExist) {
-      print('[sherpa-onxx-sst] downloadModelByName: ✓ All model files already exist, skipping download and extraction');
-      print('[sherpa-onxx-sst] downloadModelByName: ========== Download process complete (no action needed) ==========');
+      print(
+        '[sherpa-onxx-sst] downloadModelByName: ✓ All model files already exist, skipping download and extraction',
+      );
+      print(
+        '[sherpa-onxx-sst] downloadModelByName: ========== Download process complete (no action needed) ==========',
+      );
       return;
     }
 
@@ -714,26 +803,42 @@ class SherpaOnnxSTTHelper {
     final tempFilePath = '${tempDir.path}/$modelName.tar.bz2';
     final downloadedFile = File(tempFilePath);
 
-    print('[sherpa-onxx-sst] downloadModelByName: Model files missing, checking for compressed file...');
-    print('[sherpa-onxx-sst] downloadModelByName: Compressed file location (destination for download)=$tempFilePath');
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: Model files missing, checking for compressed file...',
+    );
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: Compressed file location (destination for download)=$tempFilePath',
+    );
 
     final compressedFileExists = await downloadedFile.exists();
-    print('[sherpa-onxx-sst] downloadModelByName: Compressed file (.tar.bz2) exists: $compressedFileExists');
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: Compressed file (.tar.bz2) exists: $compressedFileExists',
+    );
 
     if (compressedFileExists) {
       final compressedFileSize = await downloadedFile.length();
-      print('[sherpa-onxx-sst] downloadModelByName: Compressed file size: ${(compressedFileSize / 1024 / 1024).toStringAsFixed(2)} MB');
-      print('[sherpa-onxx-sst] downloadModelByName: Found existing .tar.bz2 file, verifying size...');
-      
+      print(
+        '[sherpa-onxx-sst] downloadModelByName: Compressed file size: ${(compressedFileSize / 1024 / 1024).toStringAsFixed(2)} MB',
+      );
+      print(
+        '[sherpa-onxx-sst] downloadModelByName: Found existing .tar.bz2 file, verifying size...',
+      );
+
       // Verify file size matches remote (to ensure it's complete)
       try {
         final localSize = await downloadedFile.length();
         final remoteSize = await _getRemoteFileSize(modelUrl);
-        
+
         if (remoteSize != null && localSize == remoteSize) {
-          print('[sherpa-onxx-sst] downloadModelByName: ✓ Compressed file size matches remote (${(localSize / 1024 / 1024).toStringAsFixed(1)} MB)');
-          print('[sherpa-onxx-sst] downloadModelByName: Skipping download, proceeding directly to extraction');
-          print('[sherpa-onxx-sst] downloadModelByName: Extraction destination: $modelDir');
+          print(
+            '[sherpa-onxx-sst] downloadModelByName: ✓ Compressed file size matches remote (${(localSize / 1024 / 1024).toStringAsFixed(1)} MB)',
+          );
+          print(
+            '[sherpa-onxx-sst] downloadModelByName: Skipping download, proceeding directly to extraction',
+          );
+          print(
+            '[sherpa-onxx-sst] downloadModelByName: Extraction destination: $modelDir',
+          );
           // File exists and size matches, skip download and go straight to extraction
           await _extractModel(
             downloadedFile,
@@ -741,17 +846,27 @@ class SherpaOnnxSTTHelper {
             modelName,
             onProgress: onExtractionProgress,
           );
-          print('[sherpa-onxx-sst] downloadModelByName: ========== Download process complete (extraction finished) ==========');
+          print(
+            '[sherpa-onxx-sst] downloadModelByName: ========== Download process complete (extraction finished) ==========',
+          );
           return;
         } else {
-          print('[sherpa-onxx-sst] downloadModelByName: ✗ Compressed file size mismatch (local: ${(localSize / 1024 / 1024).toStringAsFixed(2)} MB, remote: ${remoteSize != null ? (remoteSize / 1024 / 1024).toStringAsFixed(2) : "unknown"} MB)');
-          print('[sherpa-onxx-sst] downloadModelByName: Deleting invalid compressed file and re-downloading...');
+          print(
+            '[sherpa-onxx-sst] downloadModelByName: ✗ Compressed file size mismatch (local: ${(localSize / 1024 / 1024).toStringAsFixed(2)} MB, remote: ${remoteSize != null ? (remoteSize / 1024 / 1024).toStringAsFixed(2) : "unknown"} MB)',
+          );
+          print(
+            '[sherpa-onxx-sst] downloadModelByName: Deleting invalid compressed file and re-downloading...',
+          );
           // Size doesn't match, delete and re-download
           await downloadedFile.delete();
         }
       } catch (e) {
-        print('[sherpa-onxx-sst] downloadModelByName: ✗ Error verifying existing file: $e');
-        print('[sherpa-onxx-sst] downloadModelByName: Deleting compressed file and re-downloading...');
+        print(
+          '[sherpa-onxx-sst] downloadModelByName: ✗ Error verifying existing file: $e',
+        );
+        print(
+          '[sherpa-onxx-sst] downloadModelByName: Deleting compressed file and re-downloading...',
+        );
         // If we can't verify, delete and re-download to be safe
         if (await downloadedFile.exists()) {
           await downloadedFile.delete();
@@ -760,9 +875,15 @@ class SherpaOnnxSTTHelper {
     }
 
     // .tar.bz2 file doesn't exist or was invalid, download it
-    print('[sherpa-onxx-sst] downloadModelByName: Starting download from: $modelUrl');
-    print('[sherpa-onxx-sst] downloadModelByName: Download destination: $tempFilePath');
-    print('[sherpa-onxx-sst] downloadModelByName: Extraction will occur to: $modelDir');
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: Starting download from: $modelUrl',
+    );
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: Download destination: $tempFilePath',
+    );
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: Extraction will occur to: $modelDir',
+    );
     await FileDownloadHelper.downloadFile(
       Uri.parse(modelUrl),
       tempFilePath,
@@ -773,18 +894,28 @@ class SherpaOnnxSTTHelper {
     // After download, extract the model
     if (await downloadedFile.exists()) {
       final downloadedSize = await downloadedFile.length();
-      print('[sherpa-onxx-sst] downloadModelByName: ✓ Download complete, file size: ${(downloadedSize / 1024 / 1024).toStringAsFixed(2)} MB');
-      print('[sherpa-onxx-sst] downloadModelByName: Starting extraction to: $modelDir');
+      print(
+        '[sherpa-onxx-sst] downloadModelByName: ✓ Download complete, file size: ${(downloadedSize / 1024 / 1024).toStringAsFixed(2)} MB',
+      );
+      print(
+        '[sherpa-onxx-sst] downloadModelByName: Starting extraction to: $modelDir',
+      );
       await _extractModel(
         downloadedFile,
         modelDir,
         modelName,
         onProgress: onExtractionProgress,
       );
-      print('[sherpa-onxx-sst] downloadModelByName: ========== Download process complete (download + extraction finished) ==========');
+      print(
+        '[sherpa-onxx-sst] downloadModelByName: ========== Download process complete (download + extraction finished) ==========',
+      );
     } else {
-      print('[sherpa-onxx-sst] downloadModelByName: ✗ ERROR: Downloaded file does not exist after download');
-      print('[sherpa-onxx-sst] downloadModelByName: ========== Download process failed ==========');
+      print(
+        '[sherpa-onxx-sst] downloadModelByName: ✗ ERROR: Downloaded file does not exist after download',
+      );
+      print(
+        '[sherpa-onxx-sst] downloadModelByName: ========== Download process failed ==========',
+      );
     }
   }
 
@@ -824,7 +955,7 @@ class SherpaOnnxSTTHelper {
 
     // Determine if this is a Whisper model (no joiner) - try to infer from modelDir or check files
     final isWhisperModel = modelDir.contains('whisper');
-    
+
     // Check if all required files exist with expected names
     // For Whisper models, joiner is not required
     final allFilesExist =
@@ -887,10 +1018,12 @@ class SherpaOnnxSTTHelper {
         final extractedPath = message['extractedPath'] as String?;
         final extractedFileName = message['extractedFileName'] as String?;
         final logFile = message['logFile'] as bool? ?? false;
-        
+
         // Log extracted file paths for debugging
         if (logFile && extractedPath != null) {
-          print('[sherpa-onxx-sst] _extractModel: Extracted file: $extractedFileName -> $extractedPath');
+          print(
+            '[sherpa-onxx-sst] _extractModel: Extracted file: $extractedFileName -> $extractedPath',
+          );
         }
 
         // Build status text
@@ -955,14 +1088,22 @@ class SherpaOnnxSTTHelper {
         orElse: () => SherpaModelType.zipformerEn, // Default fallback
       );
     } catch (e) {
-      print('[sherpa-onxx-sst] _extractModel: Could not determine model type from name: $modelName');
+      print(
+        '[sherpa-onxx-sst] _extractModel: Could not determine model type from name: $modelName',
+      );
     }
-    await _verifyAndCopyModelFiles(modelDir, model: modelType, modelName: modelName);
+    await _verifyAndCopyModelFiles(
+      modelDir,
+      model: modelType,
+      modelName: modelName,
+    );
   }
 
   /// Find model files in the model directory (recursively)
   static Future<Map<String, File?>> _findModelFiles(String modelDir) async {
-    print('[sherpa-onxx-sst] _findModelFiles: Searching for model files in: $modelDir');
+    print(
+      '[sherpa-onxx-sst] _findModelFiles: Searching for model files in: $modelDir',
+    );
     final foundFiles = <String, File?>{
       'encoder': null,
       'decoder': null,
@@ -972,7 +1113,9 @@ class SherpaOnnxSTTHelper {
 
     final dir = Directory(modelDir);
     if (!await dir.exists()) {
-      print('[sherpa-onxx-sst] _findModelFiles: Directory does not exist: $modelDir');
+      print(
+        '[sherpa-onxx-sst] _findModelFiles: Directory does not exist: $modelDir',
+      );
       return foundFiles;
     }
 
@@ -982,7 +1125,7 @@ class SherpaOnnxSTTHelper {
         fileCount++;
         final name = entity.path.split('/').last.toLowerCase();
         final fullPath = entity.path;
-        
+
         // Log all .onnx and .txt files for debugging
         if (name.endsWith('.onnx') || name.endsWith('.txt')) {
           print('[sherpa-onxx-sst] _findModelFiles: Found file: $fullPath');
@@ -994,11 +1137,15 @@ class SherpaOnnxSTTHelper {
         if (name.contains('encoder') && name.endsWith('.onnx')) {
           if (foundFiles['encoder'] == null) {
             foundFiles['encoder'] = entity;
-            print('[sherpa-onxx-sst] _findModelFiles: Found encoder candidate: $fullPath');
+            print(
+              '[sherpa-onxx-sst] _findModelFiles: Found encoder candidate: $fullPath',
+            );
           } else if (!name.contains('.int8') &&
               foundFiles['encoder']!.path.toLowerCase().contains('.int8')) {
             // Prefer non-INT8 version
-            print('[sherpa-onxx-sst] _findModelFiles: Found better encoder (non-INT8): $fullPath');
+            print(
+              '[sherpa-onxx-sst] _findModelFiles: Found better encoder (non-INT8): $fullPath',
+            );
             foundFiles['encoder'] = entity;
           }
         }
@@ -1006,10 +1153,14 @@ class SherpaOnnxSTTHelper {
         if (name.contains('decoder') && name.endsWith('.onnx')) {
           if (foundFiles['decoder'] == null) {
             foundFiles['decoder'] = entity;
-            print('[sherpa-onxx-sst] _findModelFiles: Found decoder candidate: $fullPath');
+            print(
+              '[sherpa-onxx-sst] _findModelFiles: Found decoder candidate: $fullPath',
+            );
           } else if (!name.contains('.int8') &&
               foundFiles['decoder']!.path.toLowerCase().contains('.int8')) {
-            print('[sherpa-onxx-sst] _findModelFiles: Found better decoder (non-INT8): $fullPath');
+            print(
+              '[sherpa-onxx-sst] _findModelFiles: Found better decoder (non-INT8): $fullPath',
+            );
             foundFiles['decoder'] = entity;
           }
         }
@@ -1018,35 +1169,57 @@ class SherpaOnnxSTTHelper {
         if (name.contains('joiner') && name.endsWith('.onnx')) {
           if (foundFiles['joiner'] == null) {
             foundFiles['joiner'] = entity;
-            print('[sherpa-onxx-sst] _findModelFiles: Found joiner candidate: $fullPath');
+            print(
+              '[sherpa-onxx-sst] _findModelFiles: Found joiner candidate: $fullPath',
+            );
           } else if (!name.contains('.int8') &&
               foundFiles['joiner']!.path.toLowerCase().contains('.int8')) {
-            print('[sherpa-onxx-sst] _findModelFiles: Found better joiner (non-INT8): $fullPath');
+            print(
+              '[sherpa-onxx-sst] _findModelFiles: Found better joiner (non-INT8): $fullPath',
+            );
             foundFiles['joiner'] = entity;
           }
         }
         // Find tokens.txt (handles both "tokens.txt" and "tiny-tokens.txt" patterns)
-        if (foundFiles['tokens'] == null && name.contains('tokens') && name.endsWith('.txt')) {
+        if (foundFiles['tokens'] == null &&
+            name.contains('tokens') &&
+            name.endsWith('.txt')) {
           foundFiles['tokens'] = entity;
-          print('[sherpa-onxx-sst] _findModelFiles: Found tokens candidate: $fullPath');
+          print(
+            '[sherpa-onxx-sst] _findModelFiles: Found tokens candidate: $fullPath',
+          );
         }
       }
     }
-    
+
     print('[sherpa-onxx-sst] _findModelFiles: Searched $fileCount files total');
     print('[sherpa-onxx-sst] _findModelFiles: Results:');
-    print('[sherpa-onxx-sst] _findModelFiles: - encoder: ${foundFiles['encoder']?.path ?? "not found"}');
-    print('[sherpa-onxx-sst] _findModelFiles: - decoder: ${foundFiles['decoder']?.path ?? "not found"}');
-    print('[sherpa-onxx-sst] _findModelFiles: - joiner: ${foundFiles['joiner']?.path ?? "not found"}');
-    print('[sherpa-onxx-sst] _findModelFiles: - tokens: ${foundFiles['tokens']?.path ?? "not found"}');
+    print(
+      '[sherpa-onxx-sst] _findModelFiles: - encoder: ${foundFiles['encoder']?.path ?? "not found"}',
+    );
+    print(
+      '[sherpa-onxx-sst] _findModelFiles: - decoder: ${foundFiles['decoder']?.path ?? "not found"}',
+    );
+    print(
+      '[sherpa-onxx-sst] _findModelFiles: - joiner: ${foundFiles['joiner']?.path ?? "not found"}',
+    );
+    print(
+      '[sherpa-onxx-sst] _findModelFiles: - tokens: ${foundFiles['tokens']?.path ?? "not found"}',
+    );
 
     return foundFiles;
   }
 
   /// Verify model files exist and copy them to expected names if needed
-  static Future<void> _verifyAndCopyModelFiles(String modelDir, {SherpaModelType? model, String? modelName}) async {
-    print('[sherpa-onxx-sst] _verifyAndCopyModelFiles: Starting verification for modelDir=$modelDir');
-    
+  static Future<void> _verifyAndCopyModelFiles(
+    String modelDir, {
+    SherpaModelType? model,
+    String? modelName,
+  }) async {
+    print(
+      '[sherpa-onxx-sst] _verifyAndCopyModelFiles: Starting verification for modelDir=$modelDir',
+    );
+
     final encoderFile = File('$modelDir/encoder.onnx');
     final decoderFile = File('$modelDir/decoder.onnx');
     final joinerFile = File('$modelDir/joiner.onnx');
@@ -1057,61 +1230,282 @@ class SherpaOnnxSTTHelper {
     final decoderExists = await decoderFile.exists();
     final joinerExists = await joinerFile.exists();
     final tokensExists = await tokensFile.exists();
-    
+
     print('[sherpa-onxx-sst] _verifyAndCopyModelFiles: Files in root:');
-    print('[sherpa-onxx-sst] _verifyAndCopyModelFiles: - encoder.onnx: $encoderExists');
-    print('[sherpa-onxx-sst] _verifyAndCopyModelFiles: - decoder.onnx: $decoderExists');
-    print('[sherpa-onxx-sst] _verifyAndCopyModelFiles: - joiner.onnx: $joinerExists');
-    print('[sherpa-onxx-sst] _verifyAndCopyModelFiles: - tokens.txt: $tokensExists');
+    print(
+      '[sherpa-onxx-sst] _verifyAndCopyModelFiles: - encoder.onnx: $encoderExists',
+    );
+    print(
+      '[sherpa-onxx-sst] _verifyAndCopyModelFiles: - decoder.onnx: $decoderExists',
+    );
+    print(
+      '[sherpa-onxx-sst] _verifyAndCopyModelFiles: - joiner.onnx: $joinerExists',
+    );
+    print(
+      '[sherpa-onxx-sst] _verifyAndCopyModelFiles: - tokens.txt: $tokensExists',
+    );
 
     // Determine if this is a Whisper model (no joiner) or Zipformer model (has joiner)
     // Check both enum and model name string
-    final isWhisperModel = (model != null && 
-        (model == SherpaModelType.whisperTiny ||
-         model == SherpaModelType.whisperBase ||
-         model == SherpaModelType.whisperSmall)) ||
+    final isWhisperModel =
+        (model != null &&
+            (model == SherpaModelType.whisperTiny ||
+                model == SherpaModelType.whisperBase ||
+                model == SherpaModelType.whisperSmall)) ||
         (modelName != null && modelName.toLowerCase().contains('whisper'));
-    
-    print('[sherpa-onxx-sst] _verifyAndCopyModelFiles: Is Whisper model: $isWhisperModel (model=$model, modelName=$modelName)');
+
+    print(
+      '[sherpa-onxx-sst] _verifyAndCopyModelFiles: Is Whisper model: $isWhisperModel (model=$model, modelName=$modelName)',
+    );
 
     // For Whisper models, joiner is not required
-    final requiredFilesExist = encoderExists &&
+    final requiredFilesExist =
+        encoderExists &&
         decoderExists &&
         tokensExists &&
         (isWhisperModel || joinerExists);
 
     if (requiredFilesExist) {
-      print('[sherpa-onxx-sst] _verifyAndCopyModelFiles: ✓ All required files exist in root, no action needed');
+      print(
+        '[sherpa-onxx-sst] _verifyAndCopyModelFiles: ✓ All required files exist in root, no action needed',
+      );
       return;
     }
 
-    print('[sherpa-onxx-sst] _verifyAndCopyModelFiles: Some files missing, searching subdirectories...');
+    print(
+      '[sherpa-onxx-sst] _verifyAndCopyModelFiles: Some files missing, searching subdirectories...',
+    );
     final foundFiles = await _findModelFiles(modelDir);
-    
+
     print('[sherpa-onxx-sst] _verifyAndCopyModelFiles: Found files:');
-    print('[sherpa-onxx-sst] _verifyAndCopyModelFiles: - encoder: ${foundFiles['encoder']?.path ?? "not found"}');
-    print('[sherpa-onxx-sst] _verifyAndCopyModelFiles: - decoder: ${foundFiles['decoder']?.path ?? "not found"}');
-    print('[sherpa-onxx-sst] _verifyAndCopyModelFiles: - joiner: ${foundFiles['joiner']?.path ?? "not found"}');
-    print('[sherpa-onxx-sst] _verifyAndCopyModelFiles: - tokens: ${foundFiles['tokens']?.path ?? "not found"}');
+    print(
+      '[sherpa-onxx-sst] _verifyAndCopyModelFiles: - encoder: ${foundFiles['encoder']?.path ?? "not found"}',
+    );
+    print(
+      '[sherpa-onxx-sst] _verifyAndCopyModelFiles: - decoder: ${foundFiles['decoder']?.path ?? "not found"}',
+    );
+    print(
+      '[sherpa-onxx-sst] _verifyAndCopyModelFiles: - joiner: ${foundFiles['joiner']?.path ?? "not found"}',
+    );
+    print(
+      '[sherpa-onxx-sst] _verifyAndCopyModelFiles: - tokens: ${foundFiles['tokens']?.path ?? "not found"}',
+    );
 
     // Copy/rename files to expected names in root
     if (foundFiles['encoder'] != null && !encoderExists) {
-      print('[sherpa-onxx-sst] _verifyAndCopyModelFiles: Copying encoder from ${foundFiles['encoder']!.path} to ${encoderFile.path}');
+      print(
+        '[sherpa-onxx-sst] _verifyAndCopyModelFiles: Copying encoder from ${foundFiles['encoder']!.path} to ${encoderFile.path}',
+      );
       await foundFiles['encoder']!.copy(encoderFile.path);
     }
     if (foundFiles['decoder'] != null && !decoderExists) {
-      print('[sherpa-onxx-sst] _verifyAndCopyModelFiles: Copying decoder from ${foundFiles['decoder']!.path} to ${decoderFile.path}');
+      print(
+        '[sherpa-onxx-sst] _verifyAndCopyModelFiles: Copying decoder from ${foundFiles['decoder']!.path} to ${decoderFile.path}',
+      );
       await foundFiles['decoder']!.copy(decoderFile.path);
     }
     if (foundFiles['joiner'] != null && !joinerExists && !isWhisperModel) {
-      print('[sherpa-onxx-sst] _verifyAndCopyModelFiles: Copying joiner from ${foundFiles['joiner']!.path} to ${joinerFile.path}');
+      print(
+        '[sherpa-onxx-sst] _verifyAndCopyModelFiles: Copying joiner from ${foundFiles['joiner']!.path} to ${joinerFile.path}',
+      );
       await foundFiles['joiner']!.copy(joinerFile.path);
     }
     if (foundFiles['tokens'] != null && !tokensExists) {
-      print('[sherpa-onxx-sst] _verifyAndCopyModelFiles: Copying tokens from ${foundFiles['tokens']!.path} to ${tokensFile.path}');
+      print(
+        '[sherpa-onxx-sst] _verifyAndCopyModelFiles: Copying tokens from ${foundFiles['tokens']!.path} to ${tokensFile.path}',
+      );
       await foundFiles['tokens']!.copy(tokensFile.path);
     }
-    
+
     print('[sherpa-onxx-sst] _verifyAndCopyModelFiles: Verification complete');
+  }
+
+  /// Debug model information - prints comprehensive model status
+  ///
+  /// [modelName] - The model name to debug
+  /// [displayName] - Optional display name for the model
+  static Future<void> debugModel(
+    String modelName, {
+    String? displayName,
+  }) async {
+    print('\n');
+    print('═══════════════════════════════════════════════════════════════');
+    print('🔍 SHERPA-ONNX MODEL DEBUG: ${displayName ?? modelName}');
+    print('═══════════════════════════════════════════════════════════════');
+    print('');
+
+    // 1. Model name
+    print('📦 MODEL NAME:');
+    print('   Name: $modelName');
+    if (displayName != null) {
+      print('   Display: $displayName');
+    }
+    print('');
+
+    // 2. File locations
+    print('📁 FILE LOCATIONS:');
+    final documentsDir = await getApplicationDocumentsDirectory();
+    final modelDir = '${documentsDir.path}/sherpa_onnx_models/$modelName';
+    final tempDir = await getTemporaryDirectory();
+    final zipFilePath = '${tempDir.path}/$modelName.tar.bz2';
+    final downloadUrl =
+        'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/$modelName.tar.bz2';
+
+    print('   Model Directory: $modelDir');
+    print('   Zip File: $zipFilePath');
+    print('   Download URL: $downloadUrl');
+    print('');
+
+    // 3. Zip file status
+    print('📦 ZIP FILE STATUS:');
+    final zipFile = File(zipFilePath);
+    final zipExists = await zipFile.exists();
+    if (zipExists) {
+      final zipSize = await zipFile.length();
+      print(
+        '   ✓ Zip file exists: ${(zipSize / 1024 / 1024).toStringAsFixed(2)} MB',
+      );
+
+      // Check remote size for comparison
+      try {
+        final remoteSize = await _getRemoteFileSize(
+          'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/$modelName.tar.bz2',
+        );
+        if (remoteSize != null) {
+          final matches = zipSize == remoteSize;
+          print(
+            '   ${matches ? "✓" : "✗"} Remote size: ${(remoteSize / 1024 / 1024).toStringAsFixed(2)} MB ${matches ? "(matches)" : "(mismatch)"}',
+          );
+        }
+      } catch (e) {
+        print('   ⚠ Could not check remote size: $e');
+      }
+    } else {
+      print('   ✗ Zip file does not exist');
+    }
+    print('');
+
+    // 4. Model directory status
+    print('📂 MODEL DIRECTORY STATUS:');
+    final modelDirFile = Directory(modelDir);
+    final modelDirExists = await modelDirFile.exists();
+    if (modelDirExists) {
+      print('   ✓ Directory exists');
+    } else {
+      print('   ✗ Directory does not exist');
+      print('');
+      print('═══════════════════════════════════════════════════════════════');
+      print('');
+      return;
+    }
+    print('');
+
+    // 5. Expected model files with status
+    print('✅ EXPECTED MODEL FILES:');
+    final encoderFile = File('$modelDir/encoder.onnx');
+    final decoderFile = File('$modelDir/decoder.onnx');
+    final joinerFile = File('$modelDir/joiner.onnx');
+    final tokensFile = File('$modelDir/tokens.txt');
+
+    final encoderExists = await encoderFile.exists();
+    final decoderExists = await decoderFile.exists();
+    final joinerExists = await joinerFile.exists();
+    final tokensExists = await tokensFile.exists();
+
+    final isWhisperModel = modelName.contains('whisper');
+
+    print('   ${encoderExists ? "✓" : "✗"} encoder.onnx: ${encoderFile.path}');
+    print('   ${decoderExists ? "✓" : "✗"} decoder.onnx: ${decoderFile.path}');
+    if (isWhisperModel) {
+      print('   ⚠ joiner.onnx: Not required for Whisper models');
+    } else {
+      print('   ${joinerExists ? "✓" : "✗"} joiner.onnx: ${joinerFile.path}');
+    }
+    print('   ${tokensExists ? "✓" : "✗"} tokens.txt: ${tokensFile.path}');
+    print('');
+
+    // Check if all required files exist
+    final allRequiredExist =
+        encoderExists &&
+        decoderExists &&
+        tokensExists &&
+        (isWhisperModel || joinerExists);
+
+    print(
+      '   Overall Status: ${allRequiredExist ? "✓ All required files exist" : "✗ Missing required files"}',
+    );
+    print('');
+
+    // 6. Model files dump (all files in directory)
+    print('📋 ALL FILES IN MODEL DIRECTORY:');
+    try {
+      int fileCount = 0;
+      int totalSize = 0;
+      final files = <String, int>{};
+
+      await for (final entity in modelDirFile.list(recursive: true)) {
+        if (entity is File) {
+          fileCount++;
+          final size = await entity.length();
+          totalSize += size;
+          final relativePath = entity.path.replaceFirst('$modelDir/', '');
+          files[relativePath] = size;
+        }
+      }
+
+      if (files.isEmpty) {
+        print('   (No files found)');
+      } else {
+        print('   Total files: $fileCount');
+        print(
+          '   Total size: ${(totalSize / 1024 / 1024).toStringAsFixed(2)} MB',
+        );
+        print('');
+        print('   Files:');
+        final sortedFiles = files.entries.toList()
+          ..sort((a, b) => a.key.compareTo(b.key));
+
+        for (final entry in sortedFiles) {
+          final size = entry.value;
+          final sizeStr = size > 1024 * 1024
+              ? '${(size / 1024 / 1024).toStringAsFixed(2)} MB'
+              : size > 1024
+              ? '${(size / 1024).toStringAsFixed(2)} KB'
+              : '$size B';
+          print('     • ${entry.key} ($sizeStr)');
+        }
+      }
+    } catch (e) {
+      print('   ⚠ Error listing files: $e');
+    }
+    print('');
+
+    // 7. Found model files (using _findModelFiles)
+    print('🔍 FOUND MODEL FILES (via search):');
+    final foundFiles = await _findModelFiles(modelDir);
+    print('   Encoder: ${foundFiles['encoder']?.path ?? "not found"}');
+    print('   Decoder: ${foundFiles['decoder']?.path ?? "not found"}');
+    print('   Joiner: ${foundFiles['joiner']?.path ?? "not found"}');
+    print('   Tokens: ${foundFiles['tokens']?.path ?? "not found"}');
+    print('');
+
+    // 8. Model type information
+    print('ℹ️  MODEL TYPE:');
+    print('   Is Whisper Model: $isWhisperModel');
+    if (isWhisperModel) {
+      print('   Note: Whisper models do not require joiner.onnx');
+    }
+    print('');
+
+    // 9. Model existence check result
+    print('🔎 MODEL EXISTENCE CHECK:');
+    final modelExists = await modelExistsByName(modelName);
+    print(
+      '   Result: ${modelExists ? "✓ Model exists and is ready" : "✗ Model is not ready"}',
+    );
+    print('');
+
+    print('═══════════════════════════════════════════════════════════════');
+    print('');
   }
 }

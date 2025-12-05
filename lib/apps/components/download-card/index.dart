@@ -214,8 +214,15 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
         final joinerExists = await joinerFile.exists();
         final tokensExists = await tokensFile.exists();
 
+        // Determine if this is a Whisper model (no joiner required)
+        final isWhisperModel = modelName.contains('whisper');
+
+        // For Whisper models, joiner is not required
         final modelFilesExist =
-            encoderExists && decoderExists && joinerExists && tokensExists;
+            encoderExists &&
+            decoderExists &&
+            tokensExists &&
+            (isWhisperModel || joinerExists);
         results[modelName] = modelFilesExist;
 
         // Also check if .tar.bz2 file exists (for cases where download completed but extraction didn't)
@@ -262,6 +269,32 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
     return _modelInfos.values.any(
       (info) => info.status == ModelDownloadStatus.downloaded,
     );
+  }
+
+  /// Refresh status for a specific model by checking if files exist
+  Future<void> _refreshModelStatus(ModelInfo modelInfo) async {
+    final modelName = modelInfo.modelName;
+    final modelExists = await SherpaOnnxSTTHelper.modelExistsByName(modelName);
+
+    if (mounted) {
+      setState(() {
+        if (modelExists && modelInfo.status != ModelDownloadStatus.downloaded) {
+          modelInfo.status = ModelDownloadStatus.downloaded;
+          modelInfo.hasCompressedFile = false;
+          modelInfo.statusMessage = null;
+          print(
+            '[download-card] _refreshModelStatus: Updated status to downloaded for $modelName',
+          );
+        } else if (!modelExists &&
+            modelInfo.status == ModelDownloadStatus.downloaded) {
+          // If files don't exist but status says downloaded, reset it
+          modelInfo.status = ModelDownloadStatus.notDownloaded;
+          print(
+            '[download-card] _refreshModelStatus: Reset status to notDownloaded for $modelName',
+          );
+        }
+      });
+    }
   }
 
   /// Check if any downloads are currently in progress
@@ -650,6 +683,7 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
       onDownloadModel: _downloadModel,
       onCancelDownload: _cancelDownload,
       onDeleteModel: _deleteModel,
+      onRefreshStatus: _refreshModelStatus,
     );
   }
 

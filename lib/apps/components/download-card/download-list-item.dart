@@ -14,8 +14,10 @@ class ModelInfo {
   int downloadedBytes;
   int? totalBytes;
   String? errorMessage;
-  String? statusMessage; // Current status message (e.g., "Extracting...", "Decompressing...")
-  bool hasCompressedFile; // Whether the .tar.bz2 file exists but model files don't
+  String?
+  statusMessage; // Current status message (e.g., "Extracting...", "Decompressing...")
+  bool
+  hasCompressedFile; // Whether the .tar.bz2 file exists but model files don't
 
   ModelInfo({
     this.model,
@@ -45,6 +47,7 @@ class DownloadListItem extends StatelessWidget {
   final VoidCallback? onDownload;
   final VoidCallback? onCancel;
   final VoidCallback? onDelete;
+  final VoidCallback? onRefreshStatus; // Callback to refresh model status
 
   const DownloadListItem({
     super.key,
@@ -54,6 +57,7 @@ class DownloadListItem extends StatelessWidget {
     this.onDownload,
     this.onCancel,
     this.onDelete,
+    this.onRefreshStatus,
   });
 
   /// Build status message widget with different styles based on process type
@@ -64,15 +68,17 @@ class DownloadListItem extends StatelessWidget {
     String? errorMessage,
   ) {
     // Check if we're in extraction/decompression phase (unzipping)
-    final isUnzipping = statusMessage.toLowerCase().contains('extracting') ||
+    final isUnzipping =
+        statusMessage.toLowerCase().contains('extracting') ||
         statusMessage.toLowerCase().contains('decompressing') ||
         statusMessage.toLowerCase().contains('decoding') ||
         statusMessage.toLowerCase().contains('decompressed') ||
         statusMessage.toLowerCase().contains('decoded') ||
         statusMessage.toLowerCase().contains('reading archive');
-    
+
     // Check if we're in other processing phases (not download, not unzip)
-    final isOtherProcess = !isDownloading && !isUnzipping && statusMessage.isNotEmpty;
+    final isOtherProcess =
+        !isDownloading && !isUnzipping && statusMessage.isNotEmpty;
 
     if (isUnzipping) {
       // Parse the status message to extract filename and progress
@@ -98,7 +104,8 @@ class DownloadListItem extends StatelessWidget {
           final current = match.group(1);
           final total = match.group(2);
           if (current != null && total != null) {
-            final percent = (int.parse(current) / int.parse(total) * 100).round();
+            final percent = (int.parse(current) / int.parse(total) * 100)
+                .round();
             displayProgress = progressText.replaceAll(
               '($current/$total)',
               '$percent%',
@@ -181,173 +188,197 @@ class DownloadListItem extends StatelessWidget {
     final isDownloading = modelInfo.status == ModelDownloadStatus.downloading;
     final hasError = modelInfo.status == ModelDownloadStatus.error;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.fromLTRB(16, 8, 0, 8),
-      decoration: BoxDecoration(
-        color: isDownloaded
-            ? Colors.green[50]
-            : hasError
-            ? Colors.red[50]
-            : Colors.grey[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
+    return GestureDetector(
+      onTap: () async {
+        // Call debug method on tap
+        await SherpaOnnxSTTHelper.debugModel(
+          modelInfo.modelName,
+          displayName: modelInfo.displayName,
+        );
+
+        // After debug, check if model exists and refresh status if needed
+        final modelExists = await SherpaOnnxSTTHelper.modelExistsByName(
+          modelInfo.modelName,
+        );
+
+        // If model exists but status is not downloaded, refresh status
+        if (modelExists && modelInfo.status != ModelDownloadStatus.downloaded) {
+          onRefreshStatus?.call();
+        }
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.fromLTRB(16, 8, 0, 8),
+        decoration: BoxDecoration(
           color: isDownloaded
-              ? Colors.green[200]!
+              ? Colors.green[50]
               : hasError
-              ? Colors.red[200]!
-              : Colors.grey[300]!,
+              ? Colors.red[50]
+              : Colors.grey[50],
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isDownloaded
+                ? Colors.green[200]!
+                : hasError
+                ? Colors.red[200]!
+                : Colors.grey[300]!,
+          ),
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // WRAPPED ROW FIX ▶️ Icons now align to the far right
-          SizedBox(
-            width: double.infinity,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                // LEFT SIDE TEXT
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              modelInfo.displayName,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          if (isRequired) ...[
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.orange[100],
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(
-                                  color: Colors.orange[300]!,
-                                  width: 1,
-                                ),
-                              ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // WRAPPED ROW FIX ▶️ Icons now align to the far right
+            SizedBox(
+              width: double.infinity,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  // LEFT SIDE TEXT
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
                               child: Text(
-                                'Required',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.orange[800],
+                                modelInfo.displayName,
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
                                 ),
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
+                            if (isRequired) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange[100],
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(
+                                    color: Colors.orange[300]!,
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Text(
+                                  'Required',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.orange[800],
+                                  ),
+                                ),
+                              ),
+                            ],
                           ],
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        fileSizeText,
-                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                      ),
-                      // Status message (for extraction progress, etc.)
-                      if (modelInfo.statusMessage != null &&
-                          modelInfo.statusMessage!.isNotEmpty) ...[
+                        ),
                         const SizedBox(height: 4),
-                        _buildStatusMessage(
-                          modelInfo.statusMessage!,
-                          isDownloading,
-                          hasError,
-                          modelInfo.errorMessage,
+                        Text(
+                          fileSizeText,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        // Status message (for extraction progress, etc.)
+                        if (modelInfo.statusMessage != null &&
+                            modelInfo.statusMessage!.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          _buildStatusMessage(
+                            modelInfo.statusMessage!,
+                            isDownloading,
+                            hasError,
+                            modelInfo.errorMessage,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+
+                  // RIGHT SIDE ICONS
+                  if (isDownloaded)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Transform.translate(
+                          offset: const Offset(8, 0),
+                          child: Icon(
+                            Icons.check_circle,
+                            color: Colors.green[700],
+                            size: 24,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, size: 20),
+                          onPressed: onDelete,
+                          color: Colors.red[700],
+                          padding: EdgeInsets.zero,
                         ),
                       ],
-                    ],
-                  ),
-                ),
-
-                // RIGHT SIDE ICONS
-                if (isDownloaded)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      Transform.translate(
-                        offset: const Offset(8, 0),
-                        child: Icon(
-                          Icons.check_circle,
-                          color: Colors.green[700],
-                          size: 24,
+                    )
+                  else if (hasError)
+                    Icon(Icons.error, color: Colors.red[700], size: 24)
+                  else if (isDownloading)
+                    Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         ),
+                        IconButton(
+                          icon: const Icon(Icons.stop, size: 16),
+                          onPressed: onCancel,
+                          color: Colors.red[700],
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                      ],
+                    )
+                  else
+                    IconButton(
+                      icon: Icon(
+                        modelInfo.hasCompressedFile
+                            ? Icons.folder_zip
+                            : Icons.download,
+                        size: 24,
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline, size: 20),
-                        onPressed: onDelete,
-                        color: Colors.red[700],
-                        padding: EdgeInsets.zero,
+                      onPressed: isDownloaded ? null : onDownload,
+                      color: isDownloaded ? Colors.grey[400] : Colors.blue[700],
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 32,
+                        minHeight: 32,
                       ),
-                    ],
-                  )
-                else if (hasError)
-                  Icon(Icons.error, color: Colors.red[700], size: 24)
-                else if (isDownloading)
-                  Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.stop, size: 16),
-                        onPressed: onCancel,
-                        color: Colors.red[700],
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                      ),
-                    ],
-                  )
-                else
-                  IconButton(
-                    icon: Icon(
-                      modelInfo.hasCompressedFile
-                          ? Icons.folder_zip
-                          : Icons.download,
-                      size: 24,
+                      tooltip: isDownloaded
+                          ? 'Model already downloaded'
+                          : (modelInfo.hasCompressedFile
+                                ? 'Extract model'
+                                : 'Download model'),
                     ),
-                    onPressed: onDownload,
-                    color: Colors.blue[700],
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
-                      minWidth: 32,
-                      minHeight: 32,
-                    ),
-                    tooltip: modelInfo.hasCompressedFile
-                        ? 'Extract model'
-                        : 'Download model',
-                  ),
-              ],
+                ],
+              ),
             ),
-          ),
 
-          // ERROR MESSAGE
-          if (hasError && modelInfo.errorMessage != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              'Error: ${modelInfo.errorMessage}',
-              style: TextStyle(fontSize: 12, color: Colors.red[700]),
-            ),
+            // ERROR MESSAGE
+            if (hasError && modelInfo.errorMessage != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Error: ${modelInfo.errorMessage}',
+                style: TextStyle(fontSize: 12, color: Colors.red[700]),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }

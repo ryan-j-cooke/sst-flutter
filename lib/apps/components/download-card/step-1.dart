@@ -18,6 +18,7 @@ class Step1Content extends StatelessWidget {
   final Function(ModelInfo) onDownloadModel;
   final Function(ModelInfo) onCancelDownload;
   final Function(ModelInfo) onDeleteModel;
+  final Function(ModelInfo)? onRefreshStatus;
 
   const Step1Content({
     super.key,
@@ -32,6 +33,7 @@ class Step1Content extends StatelessWidget {
     required this.onDownloadModel,
     required this.onCancelDownload,
     required this.onDeleteModel,
+    this.onRefreshStatus,
   });
 
   @override
@@ -70,6 +72,9 @@ class Step1Content extends StatelessWidget {
             onDownload: () => onDownloadModel(modelInfo),
             onCancel: () => onCancelDownload(modelInfo),
             onDelete: () => onDeleteModel(modelInfo),
+            onRefreshStatus: onRefreshStatus != null
+                ? () => onRefreshStatus!(modelInfo)
+                : null,
           );
         }),
         // Footer with Download All and Next buttons
