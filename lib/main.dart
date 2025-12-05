@@ -118,6 +118,7 @@ class Language {
       'vi': 'Vietnamese',
       'ar': 'Arabic',
       'pt': 'Portuguese',
+      'br': 'Portuguese (Brazil)',
       'id': 'Indonesian',
     };
 

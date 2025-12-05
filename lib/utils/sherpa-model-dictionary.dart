@@ -666,6 +666,32 @@ class SherpaModelDictionary {
       ),
     ],
 
+    // Portuguese (Brazil) (pt-BR) - Same models as pt, but displayed as Brazilian Portuguese
+    'pt-BR': [
+      // NeMo Portuguese models (Brazilian variant)
+      SherpaModelVariant(
+        customModelName:
+            'sherpa-onnx-nemo-stt_pt_fastconformer_hybrid_large_pc',
+        accuracy: ModelAccuracy.moderate,
+        speed: ModelSpeed.moderate,
+        fileSize: '~413 MB',
+        modelName: 'sherpa-onnx-nemo-stt_pt_fastconformer_hybrid_large_pc',
+        displayName: 'NeMo Fast Conformer PT',
+        isCurrent: true, // Set as current for Brazilian Portuguese
+      ),
+      SherpaModelVariant(
+        customModelName:
+            'sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc',
+        accuracy: ModelAccuracy.moderate,
+        speed: ModelSpeed.moderate,
+        fileSize: '~428 MB',
+        modelName:
+            'sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc',
+        displayName: 'NeMo Transducer PT',
+        isCurrent: false,
+      ),
+    ],
+
     // Indonesian (id) - Available in multilingual models
     'id': [
       // Available through multilingual streaming models
