@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart';
 import 'package:stttest/apps/components/bts/sst/sherpa-onnx-btn.dart';
 import 'package:stttest/apps/components/download-card/index.dart';
@@ -166,10 +167,108 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
   SherpaModelType? selectedModel;
   String? selectedCustomModelName; // For custom models not in enum
 
+  // Text-to-Speech
+  FlutterTts? _flutterTts;
+  bool _isSpeaking = false;
+
   @override
   void initState() {
     super.initState();
+    _initializeTts();
     _initializeApp();
+  }
+
+  Future<void> _initializeTts() async {
+    _flutterTts = FlutterTts();
+    
+    // Set language based on selected language
+    if (selectedLang != null) {
+      final langCode = selectedLang!.code.contains('-')
+          ? selectedLang!.code.split('-').first
+          : selectedLang!.code;
+      await _flutterTts?.setLanguage(_getTtsLanguageCode(langCode));
+    }
+    
+    // Set speech rate and volume
+    await _flutterTts?.setSpeechRate(0.5);
+    await _flutterTts?.setVolume(1.0);
+    await _flutterTts?.setPitch(1.0);
+    
+    // Set completion handler
+    _flutterTts?.setCompletionHandler(() {
+      setState(() {
+        _isSpeaking = false;
+      });
+    });
+    
+    // Set error handler
+    _flutterTts?.setErrorHandler((msg) {
+      print('[main.dart] TTS Error: $msg');
+      setState(() {
+        _isSpeaking = false;
+      });
+    });
+  }
+
+  /// Convert language code to TTS language code
+  String _getTtsLanguageCode(String langCode) {
+    // Map common language codes to TTS language codes
+    const langMap = {
+      'en': 'en-US',
+      'th': 'th-TH',
+      'zh': 'zh-CN',
+      'ru': 'ru-RU',
+      'ko': 'ko-KR',
+      'ja': 'ja-JP',
+      'fr': 'fr-FR',
+      'es': 'es-ES',
+      'de': 'de-DE',
+      'vi': 'vi-VN',
+      'ar': 'ar-SA',
+      'pt': 'pt-BR',
+      'id': 'id-ID',
+    };
+    return langMap[langCode] ?? 'en-US';
+  }
+
+  /// Speak the transcribed text
+  Future<void> _speakText(String text) async {
+    if (text.isEmpty || text == 'Press the button to start recording') {
+      return;
+    }
+
+    if (_flutterTts == null) {
+      await _initializeTts();
+    }
+
+    // Update language if selected language changed
+    if (selectedLang != null) {
+      final langCode = selectedLang!.code.contains('-')
+          ? selectedLang!.code.split('-').first
+          : selectedLang!.code;
+      await _flutterTts?.setLanguage(_getTtsLanguageCode(langCode));
+    }
+
+    setState(() {
+      _isSpeaking = true;
+    });
+
+    try {
+      await _flutterTts?.speak(text);
+    } catch (e) {
+      print('[main.dart] Error speaking text: $e');
+      setState(() {
+        _isSpeaking = false;
+      });
+    }
+  }
+
+  /// Stop speaking
+  Future<void> _stopSpeaking() async {
+    await _flutterTts?.stop();
+    setState(() {
+      _isSpeaking = false;
+    });
   }
 
   Future<void> _initializeApp() async {
@@ -256,13 +355,19 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
     );
 
     if (modelToUse == null && modelNameToUse == null) {
-      // Get saved model preference
+      // Get saved model preference (check both enum and custom models)
       final savedModel = await TutorService.getModelPriority(normalizedCode);
+      final savedModelName = await TutorService.getModelPriorityName(
+        normalizedCode,
+      );
       print(
-        '[main.dart] _loadModelForLanguage: savedModel from preferences=${savedModel?.displayName}',
+        '[main.dart] _loadModelForLanguage: savedModel from preferences=${savedModel?.displayName}, savedModelName=$savedModelName',
       );
       if (savedModel != null) {
         modelToUse = savedModel;
+      } else if (savedModelName != null) {
+        // Custom model was saved
+        modelNameToUse = savedModelName;
       }
     }
 
@@ -506,19 +611,30 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
 
     if (result == true && mounted && selectedLang != null) {
       // Model downloaded and saved (step-2 saves via TutorService)
-      // Reload the saved model preference
+      // Reload the saved model preference (check both enum and custom)
       final savedModel = await TutorService.getModelPriority(normalizedCode);
+      final savedModelName = await TutorService.getModelPriorityName(
+        normalizedCode,
+      );
       if (savedModel != null) {
         selectedModel = savedModel;
+        selectedCustomModelName = null;
+        await _initializeSherpa();
+      } else if (savedModelName != null) {
+        // Custom model was saved
+        selectedModel = null;
+        selectedCustomModelName = savedModelName;
         await _initializeSherpa();
       } else if (model != null) {
         // Fallback to the downloaded model
         selectedModel = model;
+        selectedCustomModelName = null;
         await TutorService.saveModelPriority(normalizedCode, model);
         await _initializeSherpa();
       } else if (availableModels.isNotEmpty) {
         // Use first available model
         selectedModel = availableModels.first;
+        selectedCustomModelName = null;
         await TutorService.saveModelPriority(
           normalizedCode,
           availableModels.first,
@@ -556,10 +672,15 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
       _transcription = transcribedText;
       _statusMessage = 'Transcription complete (${percentage}% match)';
     });
+    
+    // Automatically speak the transcribed text
+    _speakText(transcribedText);
   }
 
   @override
   void dispose() {
+    _flutterTts?.stop();
+    _flutterTts = null;
     super.dispose();
   }
 
@@ -744,36 +865,76 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                // Transcription result
-                Container(
-                  padding: const EdgeInsets.all(16.0),
-                  decoration: BoxDecoration(
-                    color: Colors.blue[50],
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.blue[200]!),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Transcription:',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.grey,
+                // Transcription result (tappable to replay TTS)
+                GestureDetector(
+                  onTap: () {
+                    if (_transcription.isNotEmpty &&
+                        _transcription != 'Press the button to start recording') {
+                      if (_isSpeaking) {
+                        _stopSpeaking();
+                      } else {
+                        _speakText(_transcription);
+                      }
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(16.0),
+                    decoration: BoxDecoration(
+                      color: Colors.blue[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue[200]!),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Transcription:',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey,
+                              ),
+                            ),
+                            if (_transcription.isNotEmpty &&
+                                _transcription !=
+                                    'Press the button to start recording')
+                              Icon(
+                                _isSpeaking ? Icons.volume_up : Icons.volume_down,
+                                color: _isSpeaking ? Colors.blue[700] : Colors.grey,
+                                size: 20,
+                              ),
+                          ],
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        height: 200,
-                        child: SingleChildScrollView(
-                          child: Text(
-                            _transcription,
-                            style: const TextStyle(fontSize: 18),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          height: 200,
+                          child: SingleChildScrollView(
+                            child: Text(
+                              _transcription,
+                              style: const TextStyle(fontSize: 18),
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                        if (_transcription.isNotEmpty &&
+                            _transcription != 'Press the button to start recording')
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8.0),
+                            child: Text(
+                              _isSpeaking
+                                  ? 'Speaking... (tap to stop)'
+                                  : 'Tap to replay',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 32),

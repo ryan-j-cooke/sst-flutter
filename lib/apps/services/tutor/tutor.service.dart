@@ -16,18 +16,22 @@ class TutorService {
   /// Save the priority model for a specific language
   ///
   /// [languageCode] - The language code (e.g., 'en', 'el', 'th')
-  /// [model] - The SherpaModelType to set as priority
+  /// [model] - The SherpaModelType to set as priority (optional, for enum models)
+  /// [modelName] - The model name string (for custom models or as alternative)
   ///
   /// Returns true if saved successfully, false otherwise
   static Future<bool> saveModelPriority(
     String languageCode,
-    SherpaModelType model,
-  ) async {
+    SherpaModelType? model, {
+    String? modelName,
+  }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final key = _getModelPriorityKey(languageCode);
       // Store the model name as string (e.g., 'sherpa-onnx-zipformer-en-2023-06-26')
-      await prefs.setString(key, model.modelName);
+      final nameToSave = modelName ?? model?.modelName;
+      if (nameToSave == null) return false;
+      await prefs.setString(key, nameToSave);
       return true;
     } catch (e) {
       print('[TutorService] Error saving model priority: $e');
@@ -35,17 +39,30 @@ class TutorService {
     }
   }
 
-  /// Get the priority model for a specific language
+  /// Get the priority model name for a specific language
   ///
   /// [languageCode] - The language code (e.g., 'en', 'el', 'th')
   ///
-  /// Returns the saved SherpaModelType, or null if not set
-  static Future<SherpaModelType?> getModelPriority(String languageCode) async {
+  /// Returns the saved model name string, or null if not set
+  static Future<String?> getModelPriorityName(String languageCode) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final key = _getModelPriorityKey(languageCode);
-      final modelName = prefs.getString(key);
+      return prefs.getString(key);
+    } catch (e) {
+      print('[TutorService] Error getting model priority: $e');
+      return null;
+    }
+  }
 
+  /// Get the priority model for a specific language (returns enum if found)
+  ///
+  /// [languageCode] - The language code (e.g., 'en', 'el', 'th')
+  ///
+  /// Returns the saved SherpaModelType, or null if not set or not an enum model
+  static Future<SherpaModelType?> getModelPriority(String languageCode) async {
+    try {
+      final modelName = await getModelPriorityName(languageCode);
       if (modelName == null) return null;
 
       // Convert string back to SherpaModelType by matching modelName

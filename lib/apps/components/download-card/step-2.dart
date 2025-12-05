@@ -1,7 +1,7 @@
 import '../typeography/h3.dart';
 import '../page.dart';
 import 'package:flutter/material.dart';
-import 'package:stttest/utils/sherpa-onxx-sst.dart';
+import 'package:stttest/utils/sherpa-model-dictionary.dart';
 import 'package:stttest/apps/services/tutor/tutor.service.dart';
 
 /// Step 2 Content Widget
@@ -10,7 +10,7 @@ import 'package:stttest/apps/services/tutor/tutor.service.dart';
 class Step2Content extends StatefulWidget {
   final bool canProceed;
   final String languageCode;
-  final List<SherpaModelType> availableModels;
+  final List<SherpaModelVariant> availableModels; // Changed to support both enum and custom
   final VoidCallback? onSaveComplete;
 
   const Step2Content({
@@ -26,7 +26,7 @@ class Step2Content extends StatefulWidget {
 }
 
 class _Step2ContentState extends State<Step2Content> {
-  SherpaModelType? _selectedModel;
+  SherpaModelVariant? _selectedModel;
   bool _isLoading = true;
   bool _isSaving = false;
   bool _isSaved = false;
@@ -44,16 +44,24 @@ class _Step2ContentState extends State<Step2Content> {
     });
 
     try {
-      final savedModel = await TutorService.getModelPriority(
+      // Get saved model name (works for both enum and custom models)
+      final savedModelName = await TutorService.getModelPriorityName(
         widget.languageCode,
       );
 
       if (mounted) {
         setState(() {
-          // Find the saved model or default to first available
-          if (savedModel != null) {
+          // Check if we have any available models
+          if (widget.availableModels.isEmpty) {
+            _selectedModel = null;
+            _isLoading = false;
+            return;
+          }
+
+          // Find the saved model by comparing modelName
+          if (savedModelName != null) {
             _selectedModel = widget.availableModels.firstWhere(
-              (m) => m == savedModel,
+              (variant) => variant.modelName == savedModelName,
               orElse: () => widget.availableModels.first,
             );
           } else {
@@ -65,8 +73,10 @@ class _Step2ContentState extends State<Step2Content> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          // Default to first available on error
-          _selectedModel = widget.availableModels.first;
+          // Default to first available on error, or null if list is empty
+          _selectedModel = widget.availableModels.isNotEmpty
+              ? widget.availableModels.first
+              : null;
           _isLoading = false;
         });
       }
@@ -83,9 +93,11 @@ class _Step2ContentState extends State<Step2Content> {
 
     try {
       // Persist the model priority setting using TutorService
+      // Support both enum and custom models
       final success = await TutorService.saveModelPriority(
         widget.languageCode,
-        _selectedModel!,
+        _selectedModel!.model, // Enum model (null for custom)
+        modelName: _selectedModel!.modelName, // Always provide model name
       );
 
       if (success && mounted) {
@@ -133,13 +145,13 @@ class _Step2ContentState extends State<Step2Content> {
   }
 
   /// Select a model (without saving yet)
-  void _selectModel(SherpaModelType model) {
+  void _selectModel(SherpaModelVariant model) {
     setState(() {
       _selectedModel = model;
     });
   }
 
-  void _showModelInfo(BuildContext context, SherpaModelType model) {
+  void _showModelInfo(BuildContext context, SherpaModelVariant model) {
     // Select the model when info icon is clicked
     _selectModel(model);
 
@@ -202,6 +214,7 @@ class _Step2ContentState extends State<Step2Content> {
       );
     }
 
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -238,10 +251,10 @@ class _Step2ContentState extends State<Step2Content> {
             ),
           )
         else
-          ...widget.availableModels.map((model) {
-            final isSelected = _selectedModel == model;
-            final displayName = model.displayName;
-            final fileSize = model.fileSize;
+          ...widget.availableModels.map((variant) {
+            final isSelected = _selectedModel == variant;
+            final displayName = variant.displayName;
+            final fileSize = variant.fileSize;
 
             return Container(
               margin: const EdgeInsets.only(bottom: 6),
@@ -256,7 +269,7 @@ class _Step2ContentState extends State<Step2Content> {
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(
-                  onTap: () => _selectModel(model),
+                  onTap: () => _selectModel(variant),
                   borderRadius: BorderRadius.circular(12),
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -315,7 +328,7 @@ class _Step2ContentState extends State<Step2Content> {
                         ),
                         // Info icon at far right
                         GestureDetector(
-                          onTap: () => _showModelInfo(context, model),
+                          onTap: () => _showModelInfo(context, variant),
                           behavior: HitTestBehavior.opaque,
                           child: Padding(
                             padding: const EdgeInsets.only(left: 8),
@@ -372,8 +385,8 @@ class _Step2ContentState extends State<Step2Content> {
 /// Displays detailed information about available models with the same transition
 /// animation as the store course details page.
 class _ModelInfoPage extends StatelessWidget {
-  final List<SherpaModelType> availableModels;
-  final SherpaModelType? selectedModel;
+  final List<SherpaModelVariant> availableModels;
+  final SherpaModelVariant? selectedModel;
 
   const _ModelInfoPage({
     required this.selectedModel,
@@ -392,8 +405,8 @@ class _ModelInfoPage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            ...availableModels.map((model) {
-              final isSelected = model == selectedModel;
+            ...availableModels.map((variant) {
+              final isSelected = variant == selectedModel;
               return Container(
                 margin: const EdgeInsets.only(bottom: 16),
                 padding: const EdgeInsets.all(16),
@@ -409,7 +422,7 @@ class _ModelInfoPage extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      model.displayName,
+                      variant.displayName,
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -418,7 +431,7 @@ class _ModelInfoPage extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Size: ${model.fileSize}',
+                      'Size: ${variant.fileSize}',
                       style: TextStyle(
                         fontSize: 14,
                         color: isSelected ? Colors.teal[700] : Colors.grey[600],
@@ -426,7 +439,7 @@ class _ModelInfoPage extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Model: ${model.modelName}',
+                      'Model: ${variant.modelName}',
                       style: TextStyle(
                         fontSize: 12,
                         color: isSelected ? Colors.teal[600] : Colors.grey[500],

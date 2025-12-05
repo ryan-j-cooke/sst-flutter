@@ -178,8 +178,16 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
         _isInitializing = false;
       });
 
-      // Check if all models are already downloaded
-      _checkAllDownloaded();
+      // If models are already downloaded, automatically move to step 2
+      // Don't call _checkAllDownloaded() here as it would close the dialog
+      if (_areRequiredModelsDownloaded() && _currentStep == 0) {
+        print(
+          '[download-card] _initializeModels: Models already downloaded, moving to step 2',
+        );
+        setState(() {
+          _currentStep = 1;
+        });
+      }
     }
   }
 
@@ -487,15 +495,7 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
         });
         _checkAllDownloaded();
 
-        // Automatically move to step 2 if at least one model is downloaded
-        if (_areRequiredModelsDownloaded() && _currentStep == 0) {
-          print(
-            '[download-card] _downloadModel: Model downloaded, moving to step 2',
-          );
-          setState(() {
-            _currentStep = 1;
-          });
-        }
+        // Don't auto-advance - user must click "Next" button manually
       }
     } catch (e) {
       if (mounted) {
@@ -642,15 +642,7 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
                 false; // Model files now exist, no longer need extraction
           });
 
-          // Automatically move to step 2 if at least one model is downloaded
-          if (_areRequiredModelsDownloaded() && _currentStep == 0) {
-            print(
-              '[download-card] _downloadAllModels: Model downloaded, moving to step 2',
-            );
-            setState(() {
-              _currentStep = 1;
-            });
-          }
+          // Don't auto-advance - user must click "Next" button manually
         }
       } catch (e) {
         if (mounted) {
@@ -730,7 +722,7 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
     return Step2Content(
       canProceed: _areRequiredModelsDownloaded(),
       languageCode: widget.languageCode ?? 'en',
-      availableModels: _actualModels,
+      availableModels: _allModelVariants, // Pass all models (enum + custom)
       onSaveComplete: () {
         // When save is complete, trigger the transition to begin session
         if (widget.onAllModelsDownloaded != null) {
