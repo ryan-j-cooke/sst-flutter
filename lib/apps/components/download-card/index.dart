@@ -239,13 +239,16 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
         final modelDir = '$baseModelDir/$modelName';
 
         // Determine model type
+        // Note: Check for "transducer" first, as NeMo Transducer models contain both "nemo" and "transducer"
+        // but should be treated as Transducer models (encoder/decoder/joiner), not NeMo CTC (model.onnx)
+        final isTransducerModel = modelName.contains('transducer');
         final isWhisperModel = modelName.contains('whisper');
         final isParaformerModel = modelName.contains('paraformer');
-        final isNemoModel = modelName.contains('nemo');
+        final isNemoCtcModel = modelName.contains('nemo') && !isTransducerModel; // NeMo CTC (not Transducer)
 
         bool modelFilesExist = false;
 
-        if (isParaformerModel || isNemoModel) {
+        if (isParaformerModel || isNemoCtcModel) {
           // Paraformer and NeMo models use a single model.onnx file
           final modelFile = File('$modelDir/model.onnx');
           final tokensFile = File('$modelDir/tokens.txt');

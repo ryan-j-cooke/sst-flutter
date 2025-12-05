@@ -422,19 +422,29 @@ class SherpaOnnxSTTHelper {
       print('[sherpa-onxx-sst] modelExistsByName: Model directory=$modelDir');
 
       // Determine model type
+      // Note: Check for "transducer" first, as NeMo Transducer models contain both "nemo" and "transducer"
+      // but should be treated as Transducer models (encoder/decoder/joiner), not NeMo CTC (model.onnx)
+      final isTransducerModel = modelName.contains('transducer');
       final isWhisperModel = modelName.contains('whisper');
       final isParaformerModel = modelName.contains('paraformer');
-      final isNemoModel = modelName.contains('nemo');
+      final isNemoCtcModel =
+          modelName.contains('nemo') &&
+          !isTransducerModel; // NeMo CTC (not Transducer)
+      print(
+        '[sherpa-onxx-sst] modelExistsByName: Is Transducer model: $isTransducerModel',
+      );
       print(
         '[sherpa-onxx-sst] modelExistsByName: Is Whisper model: $isWhisperModel',
       );
       print(
         '[sherpa-onxx-sst] modelExistsByName: Is Paraformer model: $isParaformerModel',
       );
-      print('[sherpa-onxx-sst] modelExistsByName: Is NeMo model: $isNemoModel');
+      print(
+        '[sherpa-onxx-sst] modelExistsByName: Is NeMo CTC model: $isNemoCtcModel',
+      );
 
-      if (isParaformerModel || isNemoModel) {
-        // Paraformer and NeMo models use a single model.onnx file
+      if (isParaformerModel || isNemoCtcModel) {
+        // Paraformer and NeMo CTC models use a single model.onnx file
         final modelFile = File('$modelDir/model.onnx');
         final tokensFile = File('$modelDir/tokens.txt');
 
@@ -510,9 +520,17 @@ class SherpaOnnxSTTHelper {
     await Directory(modelDir).create(recursive: true);
 
     // Determine model type
+    // Note: Check for "transducer" first, as NeMo Transducer models contain both "nemo" and "transducer"
+    // but should be treated as Transducer models (encoder/decoder/joiner), not NeMo CTC (model.onnx)
+    final isTransducerModel = modelName.contains('transducer');
     final isWhisperModel = modelName.contains('whisper');
     final isParaformerModel = modelName.contains('paraformer');
-    final isNemoModel = modelName.contains('nemo');
+    final isNemoCtcModel =
+        modelName.contains('nemo') &&
+        !isTransducerModel; // NeMo CTC (not Transducer)
+    print(
+      '[sherpa-onxx-sst] ensureModelExistsByName: Is Transducer model: $isTransducerModel',
+    );
     print(
       '[sherpa-onxx-sst] ensureModelExistsByName: Is Whisper model: $isWhisperModel',
     );
@@ -520,12 +538,12 @@ class SherpaOnnxSTTHelper {
       '[sherpa-onxx-sst] ensureModelExistsByName: Is Paraformer model: $isParaformerModel',
     );
     print(
-      '[sherpa-onxx-sst] ensureModelExistsByName: Is NeMo model: $isNemoModel',
+      '[sherpa-onxx-sst] ensureModelExistsByName: Is NeMo CTC model: $isNemoCtcModel',
     );
 
     bool modelExists = false;
 
-    if (isParaformerModel || isNemoModel) {
+    if (isParaformerModel || isNemoCtcModel) {
       // Paraformer and NeMo models use a single model.onnx file
       final modelFile = File('$modelDir/model.onnx');
       final tokensFile = File('$modelDir/tokens.txt');
@@ -564,6 +582,64 @@ class SherpaOnnxSTTHelper {
       print(
         '[sherpa-onxx-sst] ensureModelExistsByName: encoderExists=$encoderExists, decoderExists=$decoderExists, joinerExists=$joinerExists, tokensExists=$tokensExists',
       );
+    }
+
+    if (!modelExists) {
+      // Model files don't exist in root - check if they exist in subdirectories
+      // If so, copy them to root (this handles cases where extraction happened before
+      // we added support for copying files to root)
+      print(
+        '[sherpa-onxx-sst] ensureModelExistsByName: Model files not in root, checking subdirectories and copying if found...',
+      );
+
+      // Determine model type for _verifyAndCopyModelFiles
+      SherpaModelType? modelType;
+      try {
+        modelType = SherpaModelType.values.firstWhere(
+          (m) => m.modelName == modelName,
+          orElse: () => SherpaModelType.zipformerEn, // Default fallback
+        );
+      } catch (e) {
+        print(
+          '[sherpa-onxx-sst] ensureModelExistsByName: Could not determine model type from name: $modelName',
+        );
+      }
+
+      // Try to verify and copy files from subdirectories
+      await _verifyAndCopyModelFiles(
+        modelDir,
+        model: modelType,
+        modelName: modelName,
+      );
+
+      // Check again if files now exist in root after copying
+      if (isParaformerModel || isNemoCtcModel) {
+        final modelFile = File('$modelDir/model.onnx');
+        final tokensFile = File('$modelDir/tokens.txt');
+        final modelFileExists = await modelFile.exists();
+        final tokensExists = await tokensFile.exists();
+        modelExists = modelFileExists && tokensExists;
+        print(
+          '[sherpa-onxx-sst] ensureModelExistsByName: After copying, model files exist in root=$modelExists',
+        );
+      } else {
+        final encoderFile = File('$modelDir/encoder.onnx');
+        final decoderFile = File('$modelDir/decoder.onnx');
+        final joinerFile = File('$modelDir/joiner.onnx');
+        final tokensFile = File('$modelDir/tokens.txt');
+        final encoderExists = await encoderFile.exists();
+        final decoderExists = await decoderFile.exists();
+        final joinerExists = await joinerFile.exists();
+        final tokensExists = await tokensFile.exists();
+        modelExists =
+            encoderExists &&
+            decoderExists &&
+            tokensExists &&
+            (isWhisperModel || joinerExists);
+        print(
+          '[sherpa-onxx-sst] ensureModelExistsByName: After copying, model files exist in root=$modelExists',
+        );
+      }
     }
 
     if (!modelExists) {
@@ -642,11 +718,19 @@ class SherpaOnnxSTTHelper {
     );
 
     // Determine model type
+    // Note: Check for "transducer" first, as NeMo Transducer models contain both "nemo" and "transducer"
+    // but should be treated as Transducer models (encoder/decoder/joiner), not NeMo CTC (model.onnx)
+    final isTransducerModel = modelName.contains('transducer');
     final isWhisperModel = modelName.contains('whisper');
     final isParaformerModel = modelName.contains('paraformer');
-    final isNemoModel = modelName.contains('nemo');
+    final isNemoCtcModel =
+        modelName.contains('nemo') &&
+        !isTransducerModel; // NeMo CTC (not Transducer)
 
     print('[sherpa-onxx-sst] initializeRecognizerByName: Checking files...');
+    print(
+      '[sherpa-onxx-sst] initializeRecognizerByName: Is Transducer model: $isTransducerModel',
+    );
     print(
       '[sherpa-onxx-sst] initializeRecognizerByName: Is Whisper model: $isWhisperModel',
     );
@@ -654,7 +738,7 @@ class SherpaOnnxSTTHelper {
       '[sherpa-onxx-sst] initializeRecognizerByName: Is Paraformer model: $isParaformerModel',
     );
     print(
-      '[sherpa-onxx-sst] initializeRecognizerByName: Is NeMo model: $isNemoModel',
+      '[sherpa-onxx-sst] initializeRecognizerByName: Is NeMo CTC model: $isNemoCtcModel',
     );
 
     if (isParaformerModel) {
@@ -740,7 +824,7 @@ class SherpaOnnxSTTHelper {
       return recognizer;
     }
 
-    if (isNemoModel) {
+    if (isNemoCtcModel) {
       // NeMo models use a single model.onnx file (similar to Paraformer)
       final modelPath = '$modelDir/model.onnx';
       final tokensPath = '$modelDir/tokens.txt';
@@ -1312,20 +1396,30 @@ class SherpaOnnxSTTHelper {
     );
 
     // Determine model type
+    // Note: Check for "transducer" first, as NeMo Transducer models contain both "nemo" and "transducer"
+    // but should be treated as Transducer models (encoder/decoder/joiner), not NeMo CTC (model.onnx)
+    final isTransducerModel = modelName.contains('transducer');
     final isWhisperModel = modelName.contains('whisper');
     final isParaformerModel = modelName.contains('paraformer');
-    final isNemoModel = modelName.contains('nemo');
+    final isNemoCtcModel =
+        modelName.contains('nemo') &&
+        !isTransducerModel; // NeMo CTC (not Transducer)
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: Is Transducer model: $isTransducerModel',
+    );
     print(
       '[sherpa-onxx-sst] downloadModelByName: Is Whisper model: $isWhisperModel',
     );
     print(
       '[sherpa-onxx-sst] downloadModelByName: Is Paraformer model: $isParaformerModel',
     );
-    print('[sherpa-onxx-sst] downloadModelByName: Is NeMo model: $isNemoModel');
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: Is NeMo CTC model: $isNemoCtcModel',
+    );
 
-    // For Paraformer and NeMo models, check for model.onnx instead
+    // For Paraformer and NeMo CTC models, check for model.onnx instead
     bool modelFilesExist;
-    if (isParaformerModel || isNemoModel) {
+    if (isParaformerModel || isNemoCtcModel) {
       final modelFile = File('$modelDir/model.onnx');
       final modelFileExists = await modelFile.exists();
       modelFilesExist = modelFileExists && tokensExists;
@@ -1917,6 +2011,11 @@ class SherpaOnnxSTTHelper {
     );
 
     // Determine model type
+    // Note: Check for "transducer" first, as NeMo Transducer models contain both "nemo" and "transducer"
+    // but should be treated as Transducer models (encoder/decoder/joiner), not NeMo CTC (model.onnx)
+    final isTransducerModel =
+        (model != null && model.modelName.contains('transducer')) ||
+        (modelName != null && modelName.toLowerCase().contains('transducer'));
     final isWhisperModel =
         (model != null &&
             (model == SherpaModelType.whisperTiny ||
@@ -1926,10 +2025,14 @@ class SherpaOnnxSTTHelper {
     final isParaformerModel =
         (model != null && model.modelName.contains('paraformer')) ||
         (modelName != null && modelName.toLowerCase().contains('paraformer'));
-    final isNemoModel =
-        (model != null && model.modelName.contains('nemo')) ||
-        (modelName != null && modelName.toLowerCase().contains('nemo'));
+    final isNemoCtcModel =
+        ((model != null && model.modelName.contains('nemo')) ||
+            (modelName != null && modelName.toLowerCase().contains('nemo'))) &&
+        !isTransducerModel; // NeMo CTC (not Transducer)
 
+    print(
+      '[sherpa-onxx-sst] _verifyAndCopyModelFiles: Is Transducer model: $isTransducerModel',
+    );
     print(
       '[sherpa-onxx-sst] _verifyAndCopyModelFiles: Is Whisper model: $isWhisperModel (model=$model, modelName=$modelName)',
     );
@@ -1937,11 +2040,11 @@ class SherpaOnnxSTTHelper {
       '[sherpa-onxx-sst] _verifyAndCopyModelFiles: Is Paraformer model: $isParaformerModel',
     );
     print(
-      '[sherpa-onxx-sst] _verifyAndCopyModelFiles: Is NeMo model: $isNemoModel',
+      '[sherpa-onxx-sst] _verifyAndCopyModelFiles: Is NeMo CTC model: $isNemoCtcModel',
     );
 
-    // For Paraformer and NeMo models, check for model.onnx instead
-    if (isParaformerModel || isNemoModel) {
+    // For Paraformer and NeMo CTC models, check for model.onnx instead
+    if (isParaformerModel || isNemoCtcModel) {
       final modelFile = File('$modelDir/model.onnx');
       final modelFileExists = await modelFile.exists();
 

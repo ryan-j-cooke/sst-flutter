@@ -681,6 +681,10 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
     });
   }
 
+  // Track last transcription to prevent duplicate TTS calls
+  String? _lastTranscriptionForTts;
+  DateTime? _lastTtsTime;
+
   /// Handle partial results during transcription (real-time updates)
   void _handleResult(String partialText) {
     setState(() {
@@ -691,10 +695,36 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
 
   /// Handle completed transcription with similarity percentage
   void _handleTranscriptionCompleted(String transcribedText, int percentage) {
+    print(
+      '[main.dart] _handleTranscriptionCompleted: Called with text="$transcribedText", percentage=$percentage',
+    );
+
     setState(() {
       _transcription = transcribedText;
       _statusMessage = 'Transcription complete (${percentage}% match)';
     });
+
+    // Prevent duplicate TTS calls for the same transcription within 2 seconds
+    final now = DateTime.now();
+    final isDuplicate =
+        _lastTranscriptionForTts == transcribedText &&
+        _lastTtsTime != null &&
+        now.difference(_lastTtsTime!).inSeconds < 2;
+
+    if (isDuplicate) {
+      print(
+        '[main.dart] _handleTranscriptionCompleted: Skipping duplicate TTS call for same text within 2 seconds',
+      );
+      return;
+    }
+
+    print(
+      '[main.dart] _handleTranscriptionCompleted: Calling TTS for transcription',
+    );
+
+    // Update tracking
+    _lastTranscriptionForTts = transcribedText;
+    _lastTtsTime = now;
 
     // Always auto-play TTS when transcription completes
     _speakText(transcribedText);
@@ -1032,7 +1062,9 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
                         ),
                       ),
                       Text(
-                        selectedModel?.displayName ?? 'na',
+                        selectedModel?.displayName ??
+                            selectedCustomModelName ??
+                            'na',
                         style: TextStyle(
                           fontSize: 12,
                           color: Colors.grey[700],
@@ -1068,7 +1100,11 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
                             '${selectedModel?.modelName ?? selectedCustomModelName ?? 'none'}_${selectedLang?.code ?? 'en'}',
                           ), // Force rebuild when model or language changes
                           languageCode: selectedLang?.code ?? 'en',
-                          sherpaModel: selectedModel,
+                          // Only pass sherpaModel if customModelName is not set
+                          // This ensures custom models are used when selected
+                          sherpaModel: selectedCustomModelName == null
+                              ? selectedModel
+                              : null,
                           customModelName: selectedCustomModelName,
                           onResult: _handleResult,
                           onTranscriptionCompleted:
