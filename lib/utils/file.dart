@@ -3,13 +3,14 @@ import 'dart:io';
 
 /// File download helper methods
 class FileDownloadHelper {
-  /// Download a file from a URI to a local path
+  /// Download a file from a URI to a local path with resume support
   ///
   /// [uri] - The URI to download from
   /// [filePath] - The local file path to save to
   /// [onProgress] - Optional callback that receives (downloadedBytes, totalBytes)
   ///                totalBytes may be null if content length is unknown
   /// [cancelToken] - Optional cancellation token to cancel the download
+  /// [resume] - If true, will resume from existing partial file if it exists
   ///
   /// Throws an exception if the download fails or is cancelled
   static Future<void> downloadFile(
@@ -17,14 +18,33 @@ class FileDownloadHelper {
     String filePath, {
     void Function(int downloaded, int? total)? onProgress,
     CancellationToken? cancelToken,
+    bool resume = true,
   }) async {
     HttpClient? client;
     IOSink? sink;
     File? file;
 
     try {
+      file = File(filePath);
+      int existingBytes = 0;
+      bool isResuming = false;
+
+      // Check if file exists and we want to resume
+      if (resume && await file.exists()) {
+        existingBytes = await file.length();
+        print('[FileDownloadHelper] downloadFile: Found existing file with $existingBytes bytes, resuming download');
+        isResuming = true;
+      }
+
       client = HttpClient();
       final request = await client.getUrl(uri);
+
+      // Add Range header if resuming
+      if (isResuming && existingBytes > 0) {
+        request.headers.add('Range', 'bytes=$existingBytes-');
+        print('[FileDownloadHelper] downloadFile: Adding Range header: bytes=$existingBytes-');
+      }
+
       final response = await request.close();
 
       // Check for cancellation before processing
@@ -32,41 +52,93 @@ class FileDownloadHelper {
         throw Exception('Download cancelled');
       }
 
-      if (response.statusCode != 200) {
+      // Check response status
+      // 206 = Partial Content (for resume), 200 = OK (for new download)
+      if (response.statusCode != 200 && response.statusCode != 206) {
         throw Exception('Failed to download file: ${response.statusCode}');
       }
 
-      file = File(filePath);
-      sink = file.openWrite();
+      // Open file in append mode if resuming, write mode if new
+      if (isResuming) {
+        // For append mode, use openWrite with mode append
+        sink = file.openWrite(mode: FileMode.append);
+      } else {
+        // For new file, use openWrite with mode write (truncates)
+        sink = file.openWrite();
+      }
 
-      int downloaded = 0;
-      final contentLength = response.contentLength;
+      int downloaded = existingBytes;
+      int? contentLength;
+
+      // Get total content length from headers
+      final contentLengthHeader = response.headers.value('content-length');
+      final contentRangeHeader = response.headers.value('content-range');
+
+      if (contentRangeHeader != null) {
+        // Parse Content-Range header: "bytes 0-999/1000" or "bytes 100-999/1000"
+        final rangeMatch = RegExp(r'bytes \d+-\d+/(\d+)').firstMatch(contentRangeHeader);
+        if (rangeMatch != null) {
+          contentLength = int.parse(rangeMatch.group(1)!);
+          print('[FileDownloadHelper] downloadFile: Content-Range header indicates total size: $contentLength bytes');
+        }
+      } else if (contentLengthHeader != null) {
+        contentLength = int.parse(contentLengthHeader);
+        if (isResuming) {
+          // If resuming, add existing bytes to content length
+          contentLength = contentLength + existingBytes;
+        }
+        print('[FileDownloadHelper] downloadFile: Content-Length header: $contentLength bytes');
+      } else {
+        // Try to get from response.contentLength
+        final responseLength = response.contentLength;
+        if (responseLength > 0) {
+          contentLength = isResuming ? responseLength + existingBytes : responseLength;
+        }
+      }
+
+      print('[FileDownloadHelper] downloadFile: Starting download from byte $downloaded, total: ${contentLength ?? "unknown"}');
 
       await for (final data in response) {
         // Check for cancellation during download
         if (cancelToken?.isCancelled ?? false) {
           await sink.close();
-          await file.delete(); // Delete partial file
+          // Don't delete partial file on cancel if resume is enabled
+          if (!resume) {
+            await file.delete();
+          }
           throw Exception('Download cancelled');
         }
 
         sink.add(data);
         downloaded += data.length;
+        
         if (onProgress != null) {
           onProgress(downloaded, contentLength);
         }
       }
+      
       await sink.close();
       client.close();
+      
+      print('[FileDownloadHelper] downloadFile: Download complete → $filePath (${downloaded} bytes)');
     } catch (e) {
       // Clean up on error or cancellation
       try {
         await sink?.close();
+        // Only delete partial file if resume is disabled or it was cancelled/failed early
         if (file != null && await file.exists()) {
-          // Only delete if it was cancelled or failed early
-          if (e.toString().contains('cancelled') ||
+          if (!resume || 
+              e.toString().contains('cancelled') ||
               e.toString().contains('Failed')) {
-            await file.delete();
+            // Only delete if resume is disabled, or if it was cancelled/failed
+            // If resume is enabled and it's just an error, keep the partial file
+            if (!resume || e.toString().contains('cancelled')) {
+              await file.delete();
+              print('[FileDownloadHelper] downloadFile: Deleted partial file due to error/cancellation');
+            } else {
+              final fileSize = await file.length();
+              print('[FileDownloadHelper] downloadFile: Keeping partial file for resume: $fileSize bytes');
+            }
           }
         }
         client?.close(force: true);

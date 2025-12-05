@@ -243,6 +243,12 @@ class DownloadListItem extends StatelessWidget {
 
   /// Show download progress dialog
   Future<void> _showDownloadDialog(BuildContext context) async {
+    print(
+      '[download-list-item] _showDownloadDialog: Starting download dialog for ${modelInfo.displayName}',
+    );
+
+    // Store setState function and state variables to use in callbacks
+    void Function(VoidCallback)? dialogSetState;
     final output = <String>[];
     bool isComplete = false;
     String? error;
@@ -252,13 +258,6 @@ class DownloadListItem extends StatelessWidget {
     String? extractionStatus;
     bool isDownloading = false;
     bool isExtracting = false;
-
-    print(
-      '[download-list-item] _showDownloadDialog: Starting download dialog for ${modelInfo.displayName}',
-    );
-
-    // Store setState function to use in callbacks
-    void Function(VoidCallback)? dialogSetState;
 
     showDialog(
       context: context,
@@ -275,19 +274,31 @@ class DownloadListItem extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (!isComplete && error == null)
+                  if (!isComplete &&
+                      error == null &&
+                      !isDownloading &&
+                      !isExtracting)
                     const CircularProgressIndicator(),
                   if (error != null)
                     Text(
                       'Error: $error',
                       style: const TextStyle(color: Colors.red),
                     ),
-                  if (isComplete && error == null)
+                  if (isComplete && error == null) ...[
                     const Icon(
                       Icons.check_circle,
                       color: Colors.green,
                       size: 48,
                     ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Download and extraction complete!',
+                      style: TextStyle(
+                        color: Colors.green,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   // Download progress
                   if (isDownloading && totalBytes != null) ...[
@@ -372,20 +383,29 @@ class DownloadListItem extends StatelessWidget {
         displayName: modelInfo.displayName,
         onProgress: (downloaded, total) {
           print(
-            '[download-list-item] _showDownloadDialog: onProgress callback - downloaded: $downloaded, total: $total',
+            '[download-list-item] _showDownloadDialog: onProgress callback - downloaded: $downloaded, total: $total, progress: ${total != null ? ((downloaded / total) * 100).toStringAsFixed(1) : "?"}%',
           );
           if (context.mounted && dialogSetState != null) {
-            downloadedBytes = downloaded;
-            totalBytes = total;
-            isDownloading = true;
             final percent = total != null
                 ? (downloaded / total * 100).toStringAsFixed(1)
                 : '?';
+            final percentValue = total != null
+                ? (downloaded / total * 100)
+                : 0.0;
+            print(
+              '[download-list-item] _showDownloadDialog: Percentage calculation: ($downloaded / ${total ?? "null"}) * 100 = $percentValue%',
+            );
             final logMsg =
                 'Downloaded: ${(downloaded / 1024 / 1024).toStringAsFixed(2)} MB / ${total != null ? (total / 1024 / 1024).toStringAsFixed(2) : "?"} MB ($percent%)';
             print('[download-list-item] _showDownloadDialog: $logMsg');
-            output.add(logMsg);
-            dialogSetState!(() {});
+
+            dialogSetState!(() {
+              downloadedBytes = downloaded;
+              totalBytes = total;
+              isDownloading = true;
+              isExtracting = false;
+              output.add(logMsg);
+            });
           }
         },
         onExtractionProgress: (progress, status) {
@@ -393,15 +413,17 @@ class DownloadListItem extends StatelessWidget {
             '[download-list-item] _showDownloadDialog: onExtractionProgress callback - progress: $progress, status: $status',
           );
           if (context.mounted && dialogSetState != null) {
-            isDownloading = false;
-            isExtracting = true;
-            extractionProgress = progress;
-            extractionStatus = status;
             final logMsg =
                 'Extraction: ${progress.toStringAsFixed(1)}% - $status';
             print('[download-list-item] _showDownloadDialog: $logMsg');
-            output.add(logMsg);
-            dialogSetState!(() {});
+
+            dialogSetState!(() {
+              isDownloading = false;
+              isExtracting = true;
+              extractionProgress = progress;
+              extractionStatus = status;
+              output.add(logMsg);
+            });
           }
         },
       );
@@ -410,21 +432,23 @@ class DownloadListItem extends StatelessWidget {
         print(
           '[download-list-item] _showDownloadDialog: Download and extraction complete',
         );
-        isDownloading = false;
-        isExtracting = false;
-        isComplete = true;
-        output.add('✓ Download and extraction complete!');
-        dialogSetState!(() {});
+        dialogSetState!(() {
+          isDownloading = false;
+          isExtracting = false;
+          isComplete = true;
+          output.add('✓ Download and extraction complete!');
+        });
         onRefreshStatus?.call();
       }
     } catch (e) {
       print('[download-list-item] _showDownloadDialog: Error occurred: $e');
       if (context.mounted && dialogSetState != null) {
-        isDownloading = false;
-        isExtracting = false;
-        error = e.toString();
-        output.add('✗ Error: $e');
-        dialogSetState!(() {});
+        dialogSetState!(() {
+          isDownloading = false;
+          isExtracting = false;
+          error = e.toString();
+          output.add('✗ Error: $e');
+        });
       }
     }
   }
