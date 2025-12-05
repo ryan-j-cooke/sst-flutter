@@ -56,6 +56,125 @@ class DownloadListItem extends StatelessWidget {
     this.onDelete,
   });
 
+  /// Build status message widget with different styles based on process type
+  Widget _buildStatusMessage(
+    String statusMessage,
+    bool isDownloading,
+    bool hasError,
+    String? errorMessage,
+  ) {
+    // Check if we're in extraction/decompression phase (unzipping)
+    final isUnzipping = statusMessage.toLowerCase().contains('extracting') ||
+        statusMessage.toLowerCase().contains('decompressing') ||
+        statusMessage.toLowerCase().contains('decoding') ||
+        statusMessage.toLowerCase().contains('decompressed') ||
+        statusMessage.toLowerCase().contains('decoded') ||
+        statusMessage.toLowerCase().contains('reading archive');
+    
+    // Check if we're in other processing phases (not download, not unzip)
+    final isOtherProcess = !isDownloading && !isUnzipping && statusMessage.isNotEmpty;
+
+    if (isUnzipping) {
+      // Parse the status message to extract filename and progress
+      String? fileName;
+      String progressText = statusMessage;
+
+      // Try to extract filename from status message
+      // Format: "Extracting files... (1/12)\nfilename.onnx"
+      if (statusMessage.contains('\n')) {
+        final parts = statusMessage.split('\n');
+        if (parts.length > 1) {
+          progressText = parts[0];
+          fileName = parts[1];
+        }
+      }
+
+      // Extract progress percentage if available
+      // Format: "Extracting files... (1/12)" or "Decompressing bzip2..."
+      String displayProgress = progressText;
+      if (progressText.contains('(') && progressText.contains(')')) {
+        final match = RegExp(r'\((\d+)/(\d+)\)').firstMatch(progressText);
+        if (match != null) {
+          final current = match.group(1);
+          final total = match.group(2);
+          if (current != null && total != null) {
+            final percent = (int.parse(current) / int.parse(total) * 100).round();
+            displayProgress = progressText.replaceAll(
+              '($current/$total)',
+              '$percent%',
+            );
+          }
+        }
+      }
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (fileName != null) ...[
+            Text(
+              fileName,
+              style: const TextStyle(
+                fontSize: 11,
+                color: Colors.blue,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 2),
+          ],
+          Text(
+            displayProgress,
+            style: const TextStyle(
+              fontSize: 11,
+              color: Colors.blue,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+          if (hasError && errorMessage != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Error: $errorMessage',
+              style: const TextStyle(
+                fontSize: 11,
+                color: Colors.red,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ],
+      );
+    } else if (isOtherProcess) {
+      // Other processes (not download, not unzip) - use orange color
+      return Text(
+        statusMessage,
+        style: const TextStyle(
+          fontSize: 11,
+          color: Colors.orange,
+          fontStyle: FontStyle.italic,
+        ),
+      );
+    } else if (hasError && errorMessage != null) {
+      // Error state
+      return Text(
+        'Error: $errorMessage',
+        style: const TextStyle(
+          fontSize: 11,
+          color: Colors.red,
+          fontWeight: FontWeight.w500,
+        ),
+      );
+    } else {
+      // Default: downloading - keep current blue color
+      return Text(
+        statusMessage,
+        style: TextStyle(
+          fontSize: 11,
+          color: Colors.blue[700],
+          fontStyle: FontStyle.italic,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDownloaded = modelInfo.status == ModelDownloadStatus.downloaded;
@@ -144,15 +263,11 @@ class DownloadListItem extends StatelessWidget {
                       if (modelInfo.statusMessage != null &&
                           modelInfo.statusMessage!.isNotEmpty) ...[
                         const SizedBox(height: 4),
-                        Text(
+                        _buildStatusMessage(
                           modelInfo.statusMessage!,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: isDownloading
-                                ? Colors.blue[700]
-                                : Colors.grey[600],
-                            fontStyle: FontStyle.italic,
-                          ),
+                          isDownloading,
+                          hasError,
+                          modelInfo.errorMessage,
                         ),
                       ],
                     ],

@@ -255,14 +255,13 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
     );
   }
 
-  /// Check if required models are downloaded (required for step 2)
-  /// For Sherpa-ONNX, we check if at least one model is downloaded
+  /// Check if at least one model is downloaded (required for step 2)
+  /// For Sherpa-ONNX, we just need any model to be downloaded and extracted
   bool _areRequiredModelsDownloaded() {
-    // Check if at least the first required model is downloaded
-    if (_actualModels.isEmpty) return false;
-    final firstModelName = _actualModels.first.modelName;
-    final firstModelInfo = _modelInfos[firstModelName];
-    return firstModelInfo?.status == ModelDownloadStatus.downloaded;
+    // Check if at least one model is downloaded
+    return _modelInfos.values.any(
+      (info) => info.status == ModelDownloadStatus.downloaded,
+    );
   }
 
   /// Check if any downloads are currently in progress

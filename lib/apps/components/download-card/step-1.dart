@@ -52,7 +52,7 @@ class Step1Content extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(bottom: 16.0),
           child: Text(
-            'Download the required Sherpa-ONNX models to enable speech-to-text functionality.',
+            'Download and extract at least one Sherpa-ONNX model to enable speech-to-text functionality.',
             style: TextStyle(
               fontSize: 14,
               color: Colors.grey[600],
@@ -67,8 +67,6 @@ class Step1Content extends StatelessWidget {
           return DownloadListItem(
             modelInfo: modelInfo,
             fileSizeText: getFileSizeText(modelInfo),
-            isRequired:
-                modelInfo == modelInfos.values.first, // First model is required
             onDownload: () => onDownloadModel(modelInfo),
             onCancel: () => onCancelDownload(modelInfo),
             onDelete: () => onDeleteModel(modelInfo),
