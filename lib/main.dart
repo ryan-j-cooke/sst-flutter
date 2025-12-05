@@ -120,6 +120,7 @@ class Language {
       'pt': 'Portuguese',
       'br': 'Portuguese (Brazil)',
       'id': 'Indonesian',
+      'he': 'Hebrew',
     };
 
     return codeToName[code] ?? code.toUpperCase();
@@ -623,25 +624,34 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
       final savedModelName = await TutorService.getModelPriorityName(
         normalizedCode,
       );
+
       if (savedModel != null) {
-        selectedModel = savedModel;
-        selectedCustomModelName = null;
+        setState(() {
+          selectedModel = savedModel;
+          selectedCustomModelName = null;
+        });
         await _initializeSherpa();
       } else if (savedModelName != null) {
         // Custom model was saved
-        selectedModel = null;
-        selectedCustomModelName = savedModelName;
+        setState(() {
+          selectedModel = null;
+          selectedCustomModelName = savedModelName;
+        });
         await _initializeSherpa();
       } else if (model != null) {
         // Fallback to the downloaded model
-        selectedModel = model;
-        selectedCustomModelName = null;
+        setState(() {
+          selectedModel = model;
+          selectedCustomModelName = null;
+        });
         await TutorService.saveModelPriority(normalizedCode, model);
         await _initializeSherpa();
       } else if (availableModels.isNotEmpty) {
         // Use first available model
-        selectedModel = availableModels.first;
-        selectedCustomModelName = null;
+        setState(() {
+          selectedModel = availableModels.first;
+          selectedCustomModelName = null;
+        });
         await TutorService.saveModelPriority(
           normalizedCode,
           availableModels.first,

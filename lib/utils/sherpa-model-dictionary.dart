@@ -692,6 +692,48 @@ class SherpaModelDictionary {
       ),
     ],
 
+    // Hebrew (he) - Multiple variants available
+    'he': [
+      // Hebrew-specific Zipformer model
+      SherpaModelVariant(
+        customModelName: 'sherpa-onnx-zipformer-he-2025-04-20',
+        accuracy: ModelAccuracy.moderate,
+        speed: ModelSpeed.fast,
+        fileSize: '~244 MB',
+        modelName: 'sherpa-onnx-zipformer-he-2025-04-20',
+        displayName: 'Zipformer HE',
+        isCurrent: false,
+      ),
+      // Multilingual Whisper models (support Hebrew and many other languages)
+      SherpaModelVariant(
+        model: SherpaModelType.whisperTiny,
+        accuracy: ModelAccuracy.lowest,
+        speed: ModelSpeed.fastest,
+        fileSize: '~111 MB',
+        modelName: 'sherpa-onnx-whisper-tiny',
+        displayName: 'Whisper Tiny (Multilingual)',
+        isCurrent: false,
+      ),
+      SherpaModelVariant(
+        model: SherpaModelType.whisperBase,
+        accuracy: ModelAccuracy.moderate,
+        speed: ModelSpeed.fast,
+        fileSize: '~198 MB',
+        modelName: 'sherpa-onnx-whisper-base',
+        displayName: 'Whisper Base (Multilingual)',
+        isCurrent: false,
+      ),
+      SherpaModelVariant(
+        model: SherpaModelType.whisperSmall,
+        accuracy: ModelAccuracy.high,
+        speed: ModelSpeed.slow,
+        fileSize: '~610 MB',
+        modelName: 'sherpa-onnx-whisper-small',
+        displayName: 'Whisper Small (Multilingual)',
+        isCurrent: false,
+      ),
+    ],
+
     // Indonesian (id) - Available in multilingual models
     'id': [
       // Available through multilingual streaming models
