@@ -363,46 +363,70 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
 
   /// Show download modal for a specific language (shows all models)
   Future<void> _showModelDownloadDialogForLanguage(String languageCode) async {
-    if (!mounted) return;
+    if (!mounted) {
+      print(
+        '[main.dart] _showModelDownloadDialogForLanguage: Not mounted, returning',
+      );
+      return;
+    }
+
+    print(
+      '[main.dart] _showModelDownloadDialogForLanguage: Starting for languageCode=$languageCode',
+    );
 
     // Normalize language code
     final normalizedCode = languageCode.contains('-')
         ? languageCode.split('-').first
         : languageCode;
 
+    print(
+      '[main.dart] _showModelDownloadDialogForLanguage: normalizedCode=$normalizedCode',
+    );
+
     // Get all available models for this language (both enum and custom)
     final allModels = SherpaModelDictionary.getModelsForLanguage(
       normalizedCode,
     );
 
+    print(
+      '[main.dart] _showModelDownloadDialogForLanguage: Found ${allModels.length} models',
+    );
+
     if (allModels.isEmpty) {
+      print(
+        '[main.dart] _showModelDownloadDialogForLanguage: No models found, showing error',
+      );
       setState(() {
         _statusMessage = 'No models available for this language';
       });
       return;
     }
 
-    // Get all enum models (for ModelDownloadCard)
-    final enumModels = allModels
-        .where((m) => m.model != null)
-        .map((m) => m.model!)
-        .toList();
-
+    print('[main.dart] _showModelDownloadDialogForLanguage: Showing dialog...');
     // Show dialog with all models (even if already downloaded)
+    // Pass languageCode and let ModelDownloadCard fetch models itself
     final result = await showDialog<bool>(
       context: context,
       barrierColor: Colors.black.withOpacity(0.5), // Transparent overlay
+      barrierDismissible: true, // Allow dismissing by tapping outside
       builder: (context) => Dialog(
         backgroundColor: Colors.transparent,
         elevation: 0,
         child: ModelDownloadCard(
-          requiredModels: enumModels.isNotEmpty ? enumModels : [],
-          languageCode: languageCode,
+          requiredModels: [], // Empty - will be populated from languageCode
+          languageCode: normalizedCode, // Pass normalized code
           onAllModelsDownloaded: () {
+            print(
+              '[main.dart] _showModelDownloadDialogForLanguage: onAllModelsDownloaded called',
+            );
             Navigator.of(context).pop(true);
           },
         ),
       ),
+    );
+
+    print(
+      '[main.dart] _showModelDownloadDialogForLanguage: Dialog result=$result',
     );
 
     if (result == true && mounted && selectedLang != null) {
@@ -413,12 +437,25 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
         selectedModel = savedModel;
         selectedCustomModelName = null;
         await _initializeSherpa();
-      } else if (enumModels.isNotEmpty) {
-        // Use first available model
-        selectedModel = enumModels.first;
-        selectedCustomModelName = null;
-        await TutorService.saveModelPriority(normalizedCode, enumModels.first);
-        await _initializeSherpa();
+      } else {
+        // Get first available enum model as fallback
+        final allModelsForLang = SherpaModelDictionary.getModelsForLanguage(
+          normalizedCode,
+        );
+        final enumModelsForLang = allModelsForLang
+            .where((m) => m.model != null)
+            .map((m) => m.model!)
+            .toList();
+        if (enumModelsForLang.isNotEmpty) {
+          // Use first available model
+          selectedModel = enumModelsForLang.first;
+          selectedCustomModelName = null;
+          await TutorService.saveModelPriority(
+            normalizedCode,
+            enumModelsForLang.first,
+          );
+          await _initializeSherpa();
+        }
       }
     }
   }

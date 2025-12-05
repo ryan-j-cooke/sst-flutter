@@ -4,6 +4,7 @@ import 'dart:isolate';
 
 import '../cards/index.dart';
 import '../../../utils/sherpa-onxx-sst.dart';
+import '../../../utils/sherpa-model-dictionary.dart';
 import '../../../utils/file.dart';
 import './download-list-item.dart';
 import './step-1.dart';
@@ -37,11 +38,15 @@ class ModelDownloadCard extends StatefulWidget {
 }
 
 class _ModelDownloadCardState extends State<ModelDownloadCard> {
-  final Map<SherpaModelType, ModelInfo> _modelInfos = {};
-  final Map<SherpaModelType, CancellationToken> _cancelTokens = {};
+  final Map<String, ModelInfo> _modelInfos =
+      {}; // Keyed by modelName (works for both enum and custom)
+  final Map<String, CancellationToken> _cancelTokens = {}; // Keyed by modelName
   bool _isInitializing = true;
   bool _isDownloadingAll = false;
   int _currentStep = 0;
+  List<SherpaModelType> _actualModels = []; // Enum models for step-2
+  List<SherpaModelVariant> _allModelVariants =
+      []; // All models (enum + custom) for display
 
   @override
   void initState() {
@@ -54,27 +59,79 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
       _isInitializing = true;
     });
 
+    // If requiredModels is empty but languageCode is provided, fetch models from dictionary
+    List<SherpaModelType> enumModelsToCheck = widget.requiredModels;
+    if (enumModelsToCheck.isEmpty && widget.languageCode != null) {
+      print(
+        '[download-card] _initializeModels: Fetching models for languageCode=${widget.languageCode}',
+      );
+      final allModels = SherpaModelDictionary.getModelsForLanguage(
+        widget.languageCode!,
+      );
+      _allModelVariants = allModels;
+
+      // Get enum models for step-2
+      enumModelsToCheck = allModels
+          .where((m) => m.model != null)
+          .map((m) => m.model!)
+          .toList();
+      print(
+        '[download-card] _initializeModels: Found ${enumModelsToCheck.length} enum models and ${allModels.length - enumModelsToCheck.length} custom models for ${widget.languageCode}',
+      );
+      // Store for later use
+      _actualModels = enumModelsToCheck;
+    } else {
+      _actualModels = enumModelsToCheck;
+      // If we have requiredModels, create variants for them
+      _allModelVariants = enumModelsToCheck
+          .map(
+            (m) => SherpaModelVariant(
+              model: m,
+              accuracy: ModelAccuracy.moderate, // Default
+              speed: ModelSpeed.moderate, // Default
+              fileSize: m.fileSize,
+              modelName: m.modelName,
+              displayName: m.displayName,
+              isCurrent: false,
+            ),
+          )
+          .toList();
+    }
+
+    if (_allModelVariants.isEmpty) {
+      print('[download-card] _initializeModels: No models to check');
+      if (mounted) {
+        setState(() {
+          _isInitializing = false;
+        });
+      }
+      return;
+    }
+
+    // Get all model names (both enum and custom) for existence checks
+    final allModelNames = _allModelVariants.map((v) => v.modelName).toList();
+
     // Run model existence checks in an isolate to avoid blocking UI
-    final results = await _checkModelsExistInIsolate(widget.requiredModels);
+    final results = await _checkModelsExistInIsolateByName(allModelNames);
 
     // Extract results from isolate response
     final modelFilesExist =
         results['modelFilesExist'] as Map<String, bool>? ?? {};
     final tarBz2Exists = results['tarBz2Exists'] as Map<String, bool>? ?? {};
 
-    // Update model infos with results from isolate
-    for (final model in widget.requiredModels) {
-      final displayName = model.displayName;
-      final fileSize = model.fileSize;
-      final modelFilesExistForModel = modelFilesExist[model.modelName] ?? false;
-      final tarBz2ExistsForModel = tarBz2Exists[model.modelName] ?? false;
+    // Update model infos with results from isolate (for all variants)
+    for (final variant in _allModelVariants) {
+      final modelName = variant.modelName;
+      final modelFilesExistForModel = modelFilesExist[modelName] ?? false;
+      final tarBz2ExistsForModel = tarBz2Exists[modelName] ?? false;
 
       // If model files exist, it's downloaded
       // If .tar.bz2 exists but model files don't, it needs extraction (show as notDownloaded, but downloadModel will handle it)
-      _modelInfos[model] = ModelInfo(
-        model: model,
-        displayName: displayName,
-        fileSize: fileSize,
+      _modelInfos[modelName] = ModelInfo(
+        model: variant.model,
+        customModelName: variant.customModelName,
+        displayName: variant.displayName,
+        fileSize: variant.fileSize,
         status: modelFilesExistForModel
             ? ModelDownloadStatus.downloaded
             : ModelDownloadStatus.notDownloaded,
@@ -84,7 +141,7 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
       // Log status for debugging
       if (tarBz2ExistsForModel && !modelFilesExistForModel) {
         print(
-          '[download-card] _initializeModels: Model ${model.displayName} has .tar.bz2 file but model files missing - will extract on download',
+          '[download-card] _initializeModels: Model ${variant.displayName} has .tar.bz2 file but model files missing - will extract on download',
         );
       }
     }
@@ -99,9 +156,18 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
     }
   }
 
-  /// Check model existence in an isolate to avoid blocking UI
+  /// Check model existence in an isolate to avoid blocking UI (using enum models)
   Future<Map<String, dynamic>> _checkModelsExistInIsolate(
     List<SherpaModelType> models,
+  ) async {
+    return _checkModelsExistInIsolateByName(
+      models.map((m) => m.modelName).toList(),
+    );
+  }
+
+  /// Check model existence in an isolate to avoid blocking UI (using model names)
+  Future<Map<String, dynamic>> _checkModelsExistInIsolateByName(
+    List<String> modelNames,
   ) async {
     // Create receive port for isolate communication
     final receivePort = ReceivePort();
@@ -109,7 +175,7 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
     // Spawn isolate to check model existence
     await Isolate.spawn(_checkModelsExistIsolate, {
       'sendPort': receivePort.sendPort,
-      'modelNames': models.map((m) => m.modelName).toList(),
+      'modelNames': modelNames,
     });
 
     // Wait for result from isolate
@@ -193,8 +259,9 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
   /// For Sherpa-ONNX, we check if at least one model is downloaded
   bool _areRequiredModelsDownloaded() {
     // Check if at least the first required model is downloaded
-    if (widget.requiredModels.isEmpty) return false;
-    final firstModelInfo = _modelInfos[widget.requiredModels.first];
+    if (_actualModels.isEmpty) return false;
+    final firstModelName = _actualModels.first.modelName;
+    final firstModelInfo = _modelInfos[firstModelName];
     return firstModelInfo?.status == ModelDownloadStatus.downloaded;
   }
 
@@ -233,8 +300,9 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
     print(
       '[download-card] _downloadModel: ========== Starting download for model ==========',
     );
+    final modelName = modelInfo.modelName;
     print(
-      '[download-card] _downloadModel: Model=${modelInfo.displayName} (${modelInfo.model.modelName})',
+      '[download-card] _downloadModel: Model=${modelInfo.displayName} ($modelName)',
     );
     print('[download-card] _downloadModel: File size=${modelInfo.fileSize}');
     print(
@@ -243,7 +311,7 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
 
     // Create cancellation token for this download
     final cancelToken = CancellationToken();
-    _cancelTokens[modelInfo.model] = cancelToken;
+    _cancelTokens[modelName] = cancelToken;
 
     setState(() {
       modelInfo.status = ModelDownloadStatus.downloading;
@@ -254,7 +322,9 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
     });
 
     try {
-      final modelDir = await SherpaOnnxSTTHelper.getModelPath(modelInfo.model);
+      // Get model directory - use getModelPath for enum models, construct for custom
+      final documentsDir = await getApplicationDocumentsDirectory();
+      final modelDir = '${documentsDir.path}/sherpa_onnx_models/$modelName';
       print(
         '[download-card] _downloadModel: Model directory destination=$modelDir',
       );
@@ -263,38 +333,76 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
 
       bool downloadComplete = false;
 
-      await SherpaOnnxSTTHelper.downloadModel(
-        modelInfo.model,
-        modelDir,
-        onProgress: (downloaded, total) {
-          if (mounted && !cancelToken.isCancelled) {
-            setState(() {
-              modelInfo.downloadedBytes = downloaded;
-              modelInfo.totalBytes = total;
+      // Use downloadModel for enum models, downloadModelByName for custom models
+      if (modelInfo.model != null) {
+        await SherpaOnnxSTTHelper.downloadModel(
+          modelInfo.model!,
+          modelDir,
+          onProgress: (downloaded, total) {
+            if (mounted && !cancelToken.isCancelled) {
+              setState(() {
+                modelInfo.downloadedBytes = downloaded;
+                modelInfo.totalBytes = total;
 
-              // When download reaches 100%, reset progress to show extraction phase
-              // This stops the download indicator from showing 100% while extraction continues
-              if (total != null && downloaded >= total && !downloadComplete) {
-                downloadComplete = true;
-                // Reset progress indicators - extraction will be shown separately
-                modelInfo.downloadedBytes = 0;
-                modelInfo.totalBytes = null;
-              }
-            });
-          }
-        },
-        onExtractionProgress: (progress, status) {
-          // Update UI during extraction phase with status message
-          // Keep status as downloading during extraction
-          if (mounted && !cancelToken.isCancelled) {
-            setState(() {
-              // Update status message to show extraction progress
-              modelInfo.statusMessage = status;
-            });
-          }
-        },
-        cancelToken: cancelToken,
-      );
+                // When download reaches 100%, reset progress to show extraction phase
+                // This stops the download indicator from showing 100% while extraction continues
+                if (total != null && downloaded >= total && !downloadComplete) {
+                  downloadComplete = true;
+                  // Reset progress indicators - extraction will be shown separately
+                  modelInfo.downloadedBytes = 0;
+                  modelInfo.totalBytes = null;
+                }
+              });
+            }
+          },
+          onExtractionProgress: (progress, status) {
+            // Update UI during extraction phase with status message
+            // Keep status as downloading during extraction
+            if (mounted && !cancelToken.isCancelled) {
+              setState(() {
+                // Update status message to show extraction progress
+                modelInfo.statusMessage = status;
+              });
+            }
+          },
+          cancelToken: cancelToken,
+        );
+      } else {
+        // Custom model - use downloadModelByName
+        await SherpaOnnxSTTHelper.downloadModelByName(
+          modelName,
+          modelDir,
+          displayName: modelInfo.displayName,
+          onProgress: (downloaded, total) {
+            if (mounted && !cancelToken.isCancelled) {
+              setState(() {
+                modelInfo.downloadedBytes = downloaded;
+                modelInfo.totalBytes = total;
+
+                // When download reaches 100%, reset progress to show extraction phase
+                // This stops the download indicator from showing 100% while extraction continues
+                if (total != null && downloaded >= total && !downloadComplete) {
+                  downloadComplete = true;
+                  // Reset progress indicators - extraction will be shown separately
+                  modelInfo.downloadedBytes = 0;
+                  modelInfo.totalBytes = null;
+                }
+              });
+            }
+          },
+          onExtractionProgress: (progress, status) {
+            // Update UI during extraction phase with status message
+            // Keep status as downloading during extraction
+            if (mounted && !cancelToken.isCancelled) {
+              setState(() {
+                // Update status message to show extraction progress
+                modelInfo.statusMessage = status;
+              });
+            }
+          },
+          cancelToken: cancelToken,
+        );
+      }
 
       if (mounted && !cancelToken.isCancelled) {
         setState(() {
@@ -307,6 +415,16 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
               false; // Model files now exist, no longer need extraction
         });
         _checkAllDownloaded();
+
+        // Automatically move to step 2 if at least one model is downloaded
+        if (_areRequiredModelsDownloaded() && _currentStep == 0) {
+          print(
+            '[download-card] _downloadModel: Model downloaded, moving to step 2',
+          );
+          setState(() {
+            _currentStep = 1;
+          });
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -327,13 +445,13 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
         }
       }
     } finally {
-      _cancelTokens.remove(modelInfo.model);
+      _cancelTokens.remove(modelName);
     }
   }
 
   /// Cancel a model download
   void _cancelDownload(ModelInfo modelInfo) {
-    final cancelToken = _cancelTokens[modelInfo.model];
+    final cancelToken = _cancelTokens[modelInfo.modelName];
     if (cancelToken != null) {
       cancelToken.cancel();
       setState(() {
@@ -382,38 +500,67 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
 
     // Download all models in parallel
     final downloadFutures = modelsToDownload.map((modelInfo) async {
+      final modelName = modelInfo.modelName;
       // Create cancellation token for this download
       final cancelToken = CancellationToken();
-      _cancelTokens[modelInfo.model] = cancelToken;
+      _cancelTokens[modelName] = cancelToken;
 
       try {
-        final modelDir = await SherpaOnnxSTTHelper.getModelPath(
-          modelInfo.model,
-        );
+        // Get model directory - use getModelPath for enum models, construct for custom
+        final documentsDir = await getApplicationDocumentsDirectory();
+        final modelDir = '${documentsDir.path}/sherpa_onnx_models/$modelName';
         await Directory(modelDir).create(recursive: true);
 
-        await SherpaOnnxSTTHelper.downloadModel(
-          modelInfo.model,
-          modelDir,
-          onProgress: (downloaded, total) {
-            if (mounted && !cancelToken.isCancelled) {
-              setState(() {
-                modelInfo.downloadedBytes = downloaded;
-                modelInfo.totalBytes = total;
-              });
-            }
-          },
-          onExtractionProgress: (progress, status) {
-            // Update UI during extraction phase with status message
-            if (mounted && !cancelToken.isCancelled) {
-              setState(() {
-                // Update status message to show extraction progress
-                modelInfo.statusMessage = status;
-              });
-            }
-          },
-          cancelToken: cancelToken,
-        );
+        // Use downloadModel for enum models, downloadModelByName for custom models
+        if (modelInfo.model != null) {
+          await SherpaOnnxSTTHelper.downloadModel(
+            modelInfo.model!,
+            modelDir,
+            onProgress: (downloaded, total) {
+              if (mounted && !cancelToken.isCancelled) {
+                setState(() {
+                  modelInfo.downloadedBytes = downloaded;
+                  modelInfo.totalBytes = total;
+                });
+              }
+            },
+            onExtractionProgress: (progress, status) {
+              // Update UI during extraction phase with status message
+              if (mounted && !cancelToken.isCancelled) {
+                setState(() {
+                  // Update status message to show extraction progress
+                  modelInfo.statusMessage = status;
+                });
+              }
+            },
+            cancelToken: cancelToken,
+          );
+        } else {
+          // Custom model - use downloadModelByName
+          await SherpaOnnxSTTHelper.downloadModelByName(
+            modelName,
+            modelDir,
+            displayName: modelInfo.displayName,
+            onProgress: (downloaded, total) {
+              if (mounted && !cancelToken.isCancelled) {
+                setState(() {
+                  modelInfo.downloadedBytes = downloaded;
+                  modelInfo.totalBytes = total;
+                });
+              }
+            },
+            onExtractionProgress: (progress, status) {
+              // Update UI during extraction phase with status message
+              if (mounted && !cancelToken.isCancelled) {
+                setState(() {
+                  // Update status message to show extraction progress
+                  modelInfo.statusMessage = status;
+                });
+              }
+            },
+            cancelToken: cancelToken,
+          );
+        }
 
         if (mounted && !cancelToken.isCancelled) {
           setState(() {
@@ -423,6 +570,16 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
             modelInfo.hasCompressedFile =
                 false; // Model files now exist, no longer need extraction
           });
+
+          // Automatically move to step 2 if at least one model is downloaded
+          if (_areRequiredModelsDownloaded() && _currentStep == 0) {
+            print(
+              '[download-card] _downloadAllModels: Model downloaded, moving to step 2',
+            );
+            setState(() {
+              _currentStep = 1;
+            });
+          }
         }
       } catch (e) {
         if (mounted) {
@@ -442,7 +599,7 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
           }
         }
       } finally {
-        _cancelTokens.remove(modelInfo.model);
+        _cancelTokens.remove(modelName);
       }
     });
 
@@ -501,7 +658,7 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
     return Step2Content(
       canProceed: _areRequiredModelsDownloaded(),
       languageCode: widget.languageCode ?? 'en',
-      availableModels: widget.requiredModels,
+      availableModels: _actualModels,
       onSaveComplete: () {
         // When save is complete, trigger the transition to begin session
         if (widget.onAllModelsDownloaded != null) {
@@ -609,7 +766,10 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
     }
 
     try {
-      final modelDir = await SherpaOnnxSTTHelper.getModelPath(modelInfo.model);
+      // Get model directory - use getModelPath for enum models, construct for custom
+      final documentsDir = await getApplicationDocumentsDirectory();
+      final modelName = modelInfo.modelName;
+      final modelDir = '${documentsDir.path}/sherpa_onnx_models/$modelName';
       final modelDirFile = Directory(modelDir);
 
       // Delete the entire model directory

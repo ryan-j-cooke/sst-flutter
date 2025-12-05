@@ -420,16 +420,28 @@ class SherpaOnnxSTTHelper {
     await Future.delayed(const Duration(milliseconds: 50));
     
     print('[sherpa-onxx-sst] initializeRecognizerByName: All files exist, creating recognizer config...');
-    // Initialize with transducer model config (for Zipformer models)
-    final transducerConfig = OfflineTransducerModelConfig(
-      encoder: encoderPath,
-      decoder: decoderPath,
-      joiner: joinerPath,
-    );
-    final modelConfig = OfflineModelConfig(
-      transducer: transducerConfig,
-      tokens: tokensPath,
-    );
+    
+    // Use Whisper config for Whisper models, Transducer config for others
+    final modelConfig = isWhisperModel
+        ? OfflineModelConfig(
+            whisper: OfflineWhisperModelConfig(
+              encoder: encoderPath,
+              decoder: decoderPath,
+              language: '', // Auto-detect language
+              task: 'transcribe',
+              tailPaddings: -1,
+            ),
+            tokens: tokensPath,
+          )
+        : OfflineModelConfig(
+            transducer: OfflineTransducerModelConfig(
+              encoder: encoderPath,
+              decoder: decoderPath,
+              joiner: joinerPath,
+            ),
+            tokens: tokensPath,
+          );
+    
     final recognizerConfig = OfflineRecognizerConfig(
       model: modelConfig,
       feat: FeatureConfig(sampleRate: 16000),

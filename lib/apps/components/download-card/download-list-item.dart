@@ -6,7 +6,8 @@ enum ModelDownloadStatus { notDownloaded, downloading, downloaded, error }
 
 /// Model info with download status
 class ModelInfo {
-  final SherpaModelType model;
+  final SherpaModelType? model; // Null for custom models
+  final String? customModelName; // Used for custom models
   final String displayName;
   final String fileSize;
   ModelDownloadStatus status;
@@ -17,7 +18,8 @@ class ModelInfo {
   bool hasCompressedFile; // Whether the .tar.bz2 file exists but model files don't
 
   ModelInfo({
-    required this.model,
+    this.model,
+    this.customModelName,
     required this.displayName,
     required this.fileSize,
     this.status = ModelDownloadStatus.notDownloaded,
@@ -26,7 +28,13 @@ class ModelInfo {
     this.errorMessage,
     this.statusMessage,
     this.hasCompressedFile = false,
-  });
+  }) : assert(
+         model != null || customModelName != null,
+         'Either model or customModelName must be provided',
+       );
+
+  /// Get the model name for downloads/checks
+  String get modelName => model?.modelName ?? customModelName!;
 }
 
 /// Download List Item Widget

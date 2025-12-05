@@ -7,7 +7,7 @@ import 'package:stttest/utils/sherpa-onxx-sst.dart';
 ///
 /// Displays the model download list and footer buttons.
 class Step1Content extends StatelessWidget {
-  final Map<SherpaModelType, ModelInfo> modelInfos;
+  final Map<String, ModelInfo> modelInfos;
   final bool isDownloadingAll;
   final bool areAllModelsDownloaded;
   final bool areAllModelsDownloadingOrDownloaded;
