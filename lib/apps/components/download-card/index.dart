@@ -241,11 +241,12 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
         // Determine model type
         final isWhisperModel = modelName.contains('whisper');
         final isParaformerModel = modelName.contains('paraformer');
+        final isNemoModel = modelName.contains('nemo');
 
         bool modelFilesExist = false;
 
-        if (isParaformerModel) {
-          // Paraformer models use a single model.onnx file
+        if (isParaformerModel || isNemoModel) {
+          // Paraformer and NeMo models use a single model.onnx file
           final modelFile = File('$modelDir/model.onnx');
           final tokensFile = File('$modelDir/tokens.txt');
 
@@ -254,7 +255,7 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
 
           modelFilesExist = modelExists && tokensExists;
 
-          print('[download-card] _checkModelsExistIsolate: Model=$modelName (Paraformer)');
+          print('[download-card] _checkModelsExistIsolate: Model=$modelName (${isParaformerModel ? "Paraformer" : "NeMo"})');
           print(
             '[download-card] _checkModelsExistIsolate: model.onnx exists=$modelExists, tokensExists=$tokensExists',
           );

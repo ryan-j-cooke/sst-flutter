@@ -653,18 +653,26 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
   Future<void> _changeLanguageOrModel(LanguageModelSelection selection) async {
     final lang = selection.language;
 
+    // Stop any ongoing TTS before switching languages
+    if (_isSpeaking) {
+      await _stopSpeaking();
+    }
+
     // Update UI immediately to show selection (this happens before menu closes)
     setState(() {
       selectedLang = lang;
       _transcription = 'Press the button to start recording';
       _statusMessage = 'Loading model for ${lang.name}...';
+      // Clear model selection to force button to dispose and recreate
+      selectedModel = null;
+      selectedCustomModelName = null;
     });
 
     // Close the menu first by scheduling the processing after the current frame
     // This ensures the menu closes before we start the potentially long-running operation
     await Future.microtask(() async {
-      // Small delay to ensure menu closes visually
-      await Future.delayed(const Duration(milliseconds: 200));
+      // Small delay to ensure menu closes visually and old recognizer is disposed
+      await Future.delayed(const Duration(milliseconds: 300));
 
       if (!mounted) return;
 
@@ -1024,9 +1032,7 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
                         ),
                       ),
                       Text(
-                        selectedModel?.displayName ??
-                            selectedCustomModelName ??
-                            'na',
+                        selectedModel?.displayName ?? 'na',
                         style: TextStyle(
                           fontSize: 12,
                           color: Colors.grey[700],

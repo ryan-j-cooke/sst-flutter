@@ -152,8 +152,52 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
       print(
         '[sherpa-onnx-btn] didUpdateWidget: Model or language changed, re-initializing...',
       );
-      _recognizer = null; // Clear old recognizer
-      _initializeSherpa();
+
+      // Properly dispose old recognizer before creating new one
+      if (_recognizer != null) {
+        print('[sherpa-onnx-btn] didUpdateWidget: Disposing old recognizer...');
+        try {
+          _recognizer!.free();
+        } catch (e) {
+          print(
+            '[sherpa-onnx-btn] didUpdateWidget: Error disposing recognizer: $e',
+          );
+        }
+        _recognizer = null;
+      }
+
+      // Stop any ongoing recording/transcription
+      if (_isRecording) {
+        try {
+          _audioRecorder.stop();
+        } catch (e) {
+          print(
+            '[sherpa-onnx-btn] didUpdateWidget: Error stopping recording: $e',
+          );
+        }
+        setState(() {
+          _isRecording = false;
+          doingAction = false;
+        });
+      }
+
+      // Reset transcription state
+      setState(() {
+        _isTranscribing = false;
+        _currentRecordingPath = null;
+      });
+
+      // Schedule initialization after yielding control (can't use await in didUpdateWidget)
+      Future.microtask(() async {
+        // Yield control before initializing new recognizer
+        await Future.delayed(const Duration(milliseconds: 100));
+        await Future.microtask(() {});
+
+        // Initialize with new model
+        if (mounted) {
+          _initializeSherpa();
+        }
+      });
     }
   }
 

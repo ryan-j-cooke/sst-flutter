@@ -31,7 +31,9 @@ Future<bool> _trySystemExtraction(
     }
 
     sendPort.send({'status': 'reading', 'progress': 0.0});
-    print('[sherpa-onxx-sst] _trySystemExtraction: [0%] Using system tar/bzip2...');
+    print(
+      '[sherpa-onxx-sst] _trySystemExtraction: [0%] Using system tar/bzip2...',
+    );
 
     // Create model directory
     await Directory(modelDir).create(recursive: true);
@@ -42,13 +44,17 @@ Future<bool> _trySystemExtraction(
     // -f: file
     // -C: change to directory
     sendPort.send({'status': 'decompressing', 'progress': 10.0});
-    print('[sherpa-onxx-sst] _trySystemExtraction: [10%] Decompressing with bzip2...');
-
-    final tarProcess = await Process.start(
-      'tar',
-      ['-xjf', tarBz2Path, '-C', modelDir, '--strip-components=1'],
-      runInShell: false,
+    print(
+      '[sherpa-onxx-sst] _trySystemExtraction: [10%] Decompressing with bzip2...',
     );
+
+    final tarProcess = await Process.start('tar', [
+      '-xjf',
+      tarBz2Path,
+      '-C',
+      modelDir,
+      '--strip-components=1',
+    ], runInShell: false);
 
     // Monitor process output
     final stderr = StringBuffer();
@@ -221,7 +227,7 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
 
     // Clear compressed bytes from memory immediately after decompression
     tarBz2Bytes = null;
-    
+
     // Yield control to allow GC to reclaim memory
     await Future.delayed(const Duration(milliseconds: 50));
 
@@ -244,10 +250,10 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
 
     // Clear tar bytes from memory after decoding
     tarBytes = null;
-    
+
     // Yield control to allow GC to reclaim memory
     await Future.delayed(const Duration(milliseconds: 50));
-    
+
     // Yield control to allow GC to reclaim memory
     await Future.delayed(const Duration(milliseconds: 50));
 
@@ -352,10 +358,9 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
 
         // Clear file content reference after writing (help GC)
         // Note: file.content is still in memory in the archive, but we've written it
-        
+
         // Try to clear file content if possible (archive package limitation)
         // The archive keeps references, but we've written the file
-        
       } catch (e) {
         print(
           '[sherpa-onxx-sst] _extractModelInIsolate: ✗ ERROR extracting $filename: $e',
@@ -419,26 +424,30 @@ class SherpaOnnxSTTHelper {
       // Determine model type
       final isWhisperModel = modelName.contains('whisper');
       final isParaformerModel = modelName.contains('paraformer');
+      final isNemoModel = modelName.contains('nemo');
       print(
         '[sherpa-onxx-sst] modelExistsByName: Is Whisper model: $isWhisperModel',
       );
       print(
         '[sherpa-onxx-sst] modelExistsByName: Is Paraformer model: $isParaformerModel',
       );
+      print('[sherpa-onxx-sst] modelExistsByName: Is NeMo model: $isNemoModel');
 
-      if (isParaformerModel) {
-        // Paraformer models use a single model.onnx file
+      if (isParaformerModel || isNemoModel) {
+        // Paraformer and NeMo models use a single model.onnx file
         final modelFile = File('$modelDir/model.onnx');
         final tokensFile = File('$modelDir/tokens.txt');
-        
+
         final modelExists = await modelFile.exists();
         final tokensExists = await tokensFile.exists();
-        
+
         print(
           '[sherpa-onxx-sst] modelExistsByName: model.onnx exists: $modelExists',
         );
-        print('[sherpa-onxx-sst] modelExistsByName: tokensExists=$tokensExists');
-        
+        print(
+          '[sherpa-onxx-sst] modelExistsByName: tokensExists=$tokensExists',
+        );
+
         final allExist = modelExists && tokensExists;
         print('[sherpa-onxx-sst] modelExistsByName: Result=$allExist');
         return allExist;
@@ -503,23 +512,27 @@ class SherpaOnnxSTTHelper {
     // Determine model type
     final isWhisperModel = modelName.contains('whisper');
     final isParaformerModel = modelName.contains('paraformer');
+    final isNemoModel = modelName.contains('nemo');
     print(
       '[sherpa-onxx-sst] ensureModelExistsByName: Is Whisper model: $isWhisperModel',
     );
     print(
       '[sherpa-onxx-sst] ensureModelExistsByName: Is Paraformer model: $isParaformerModel',
     );
+    print(
+      '[sherpa-onxx-sst] ensureModelExistsByName: Is NeMo model: $isNemoModel',
+    );
 
     bool modelExists = false;
-    
-    if (isParaformerModel) {
-      // Paraformer models use a single model.onnx file
+
+    if (isParaformerModel || isNemoModel) {
+      // Paraformer and NeMo models use a single model.onnx file
       final modelFile = File('$modelDir/model.onnx');
       final tokensFile = File('$modelDir/tokens.txt');
-      
+
       final modelFileExists = await modelFile.exists();
       final tokensExists = await tokensFile.exists();
-      
+
       modelExists = modelFileExists && tokensExists;
       print(
         '[sherpa-onxx-sst] ensureModelExistsByName: Model files exist=$modelExists',
@@ -631,13 +644,17 @@ class SherpaOnnxSTTHelper {
     // Determine model type
     final isWhisperModel = modelName.contains('whisper');
     final isParaformerModel = modelName.contains('paraformer');
-    
+    final isNemoModel = modelName.contains('nemo');
+
     print('[sherpa-onxx-sst] initializeRecognizerByName: Checking files...');
     print(
       '[sherpa-onxx-sst] initializeRecognizerByName: Is Whisper model: $isWhisperModel',
     );
     print(
       '[sherpa-onxx-sst] initializeRecognizerByName: Is Paraformer model: $isParaformerModel',
+    );
+    print(
+      '[sherpa-onxx-sst] initializeRecognizerByName: Is NeMo model: $isNemoModel',
     );
 
     if (isParaformerModel) {
@@ -655,7 +672,7 @@ class SherpaOnnxSTTHelper {
       // Check files exist
       final modelFile = File(modelPath);
       final tokensFile = File(tokensPath);
-      
+
       final modelExists = await modelFile.exists();
       final tokensExists = await tokensFile.exists();
 
@@ -706,20 +723,103 @@ class SherpaOnnxSTTHelper {
       print(
         '[sherpa-onxx-sst] initializeRecognizerByName: Creating OfflineRecognizer (Paraformer)...',
       );
-      
+
       // Note: This is a blocking native operation, but we've yielded control multiple times
       // and used microtasks to ensure UI updates are processed before blocking
       final recognizer = OfflineRecognizer(recognizerConfig);
-      
+
       print(
         '[sherpa-onxx-sst] initializeRecognizerByName: Recognizer created successfully',
       );
-      
+
       // Yield after creation to allow UI to update immediately
       await Future.microtask(() {});
       await Future.delayed(Duration.zero);
       await Future.delayed(Duration.zero);
-      
+
+      return recognizer;
+    }
+
+    if (isNemoModel) {
+      // NeMo models use a single model.onnx file (similar to Paraformer)
+      final modelPath = '$modelDir/model.onnx';
+      final tokensPath = '$modelDir/tokens.txt';
+
+      print(
+        '[sherpa-onxx-sst] initializeRecognizerByName: NeMo modelPath=$modelPath',
+      );
+      print(
+        '[sherpa-onxx-sst] initializeRecognizerByName: NeMo tokensPath=$tokensPath',
+      );
+
+      // Check files exist
+      final modelFile = File(modelPath);
+      final tokensFile = File(tokensPath);
+
+      final modelExists = await modelFile.exists();
+      final tokensExists = await tokensFile.exists();
+
+      print(
+        '[sherpa-onxx-sst] initializeRecognizerByName: NeMo model.onnx exists: $modelExists',
+      );
+      print(
+        '[sherpa-onxx-sst] initializeRecognizerByName: NeMo tokensExists=$tokensExists',
+      );
+
+      if (!modelExists || !tokensExists) {
+        print(
+          '[sherpa-onxx-sst] initializeRecognizerByName: ERROR - NeMo model files missing!',
+        );
+        throw Exception('NeMo model files missing');
+      }
+
+      // Yield control multiple times to ensure UI has time to update and show loading state
+      await Future.delayed(const Duration(milliseconds: 150));
+      await Future.microtask(() {});
+      await Future.delayed(Duration.zero);
+      await Future.microtask(() {});
+
+      print(
+        '[sherpa-onxx-sst] initializeRecognizerByName: All files exist, creating NeMo recognizer config...',
+      );
+
+      // Use NeMo CTC config
+      final modelConfig = OfflineModelConfig(
+        nemoCtc: OfflineNemoEncDecCtcModelConfig(model: modelPath),
+        tokens: tokensPath,
+      );
+
+      final recognizerConfig = OfflineRecognizerConfig(
+        model: modelConfig,
+        feat: FeatureConfig(sampleRate: 16000),
+      );
+
+      // Yield control multiple times before creating recognizer (this is the heavy blocking operation)
+      // Use microtask to ensure all pending UI updates are processed before blocking
+      await Future.delayed(const Duration(milliseconds: 200));
+      await Future.microtask(() {});
+      await Future.delayed(Duration.zero);
+      await Future.microtask(() {});
+      await Future.delayed(Duration.zero);
+      await Future.microtask(() {});
+
+      print(
+        '[sherpa-onxx-sst] initializeRecognizerByName: Creating OfflineRecognizer (NeMo)...',
+      );
+
+      // Note: This is a blocking native operation, but we've yielded control multiple times
+      // and used microtasks to ensure UI updates are processed before blocking
+      final recognizer = OfflineRecognizer(recognizerConfig);
+
+      print(
+        '[sherpa-onxx-sst] initializeRecognizerByName: Recognizer created successfully',
+      );
+
+      // Yield after creation to allow UI to update immediately
+      await Future.microtask(() {});
+      await Future.delayed(Duration.zero);
+      await Future.delayed(Duration.zero);
+
       return recognizer;
     }
 
@@ -832,12 +932,12 @@ class SherpaOnnxSTTHelper {
     print(
       '[sherpa-onxx-sst] initializeRecognizerByName: Recognizer created successfully',
     );
-    
+
     // Yield after creation to allow UI to update immediately
     await Future.microtask(() {});
     await Future.delayed(Duration.zero);
     await Future.delayed(Duration.zero);
-    
+
     return recognizer;
   }
 
@@ -909,7 +1009,9 @@ class SherpaOnnxSTTHelper {
     );
 
     // Read audio file in an isolate to avoid blocking UI
-    print('[sherpa-onxx-sst] transcribeAudio: Reading audio file in isolate...');
+    print(
+      '[sherpa-onxx-sst] transcribeAudio: Reading audio file in isolate...',
+    );
     final audioBytes = await _readAudioFileInIsolate(audioPath);
     print(
       '[sherpa-onxx-sst] transcribeAudio: Audio file read, size=${audioBytes.length} bytes',
@@ -943,7 +1045,11 @@ class SherpaOnnxSTTHelper {
       }
 
       int chunkCount = 0;
-      for (int batchStart = 0; batchStart < chunks.length; batchStart += batchSize) {
+      for (
+        int batchStart = 0;
+        batchStart < chunks.length;
+        batchStart += batchSize
+      ) {
         final batchEnd = (batchStart + batchSize < chunks.length)
             ? batchStart + batchSize
             : chunks.length;
@@ -957,10 +1063,7 @@ class SherpaOnnxSTTHelper {
 
         // Feed each sample batch to recognizer
         for (final samples in samplesBatch) {
-          stream.acceptWaveform(
-            samples: samples,
-            sampleRate: 16000,
-          );
+          stream.acceptWaveform(samples: samples, sampleRate: 16000);
 
           chunkCount++;
 
@@ -998,10 +1101,10 @@ class SherpaOnnxSTTHelper {
       print(
         '[sherpa-onxx-sst] transcribeAudio: All chunks processed, getting final result...',
       );
-      
+
       // Yield before final decode
       await Future.delayed(Duration.zero);
-      
+
       // Input finished, decode and get final result
       recognizer.decode(stream);
       final result = recognizer.getResult(stream);
@@ -1052,7 +1155,8 @@ class SherpaOnnxSTTHelper {
   /// Convert bytes to float samples in an isolate to avoid blocking UI
   /// Batches multiple chunks to reduce isolate spawn overhead
   static Future<List<Float32List>> _bytesToSamplesBatchInIsolate(
-      List<List<int>> chunks) async {
+    List<List<int>> chunks,
+  ) async {
     final receivePort = ReceivePort();
 
     await Isolate.spawn(_bytesToSamplesBatchIsolate, {
@@ -1090,7 +1194,6 @@ class SherpaOnnxSTTHelper {
       sendPort.send(List<Float32List>.filled(chunks.length, Float32List(0)));
     }
   }
-
 
   /// Get the size of a remote file via HEAD request
   static Future<int?> _getRemoteFileSize(String url) async {
@@ -1208,18 +1311,35 @@ class SherpaOnnxSTTHelper {
       '[sherpa-onxx-sst] downloadModelByName: - tokens.txt exists: $tokensExists',
     );
 
-    // Determine if this is a Whisper model (no joiner required)
+    // Determine model type
     final isWhisperModel = modelName.contains('whisper');
+    final isParaformerModel = modelName.contains('paraformer');
+    final isNemoModel = modelName.contains('nemo');
     print(
       '[sherpa-onxx-sst] downloadModelByName: Is Whisper model: $isWhisperModel',
     );
+    print(
+      '[sherpa-onxx-sst] downloadModelByName: Is Paraformer model: $isParaformerModel',
+    );
+    print('[sherpa-onxx-sst] downloadModelByName: Is NeMo model: $isNemoModel');
 
-    // For Whisper models, joiner is not required
-    final modelFilesExist =
-        encoderExists &&
-        decoderExists &&
-        tokensExists &&
-        (isWhisperModel || joinerExists);
+    // For Paraformer and NeMo models, check for model.onnx instead
+    bool modelFilesExist;
+    if (isParaformerModel || isNemoModel) {
+      final modelFile = File('$modelDir/model.onnx');
+      final modelFileExists = await modelFile.exists();
+      modelFilesExist = modelFileExists && tokensExists;
+      print(
+        '[sherpa-onxx-sst] downloadModelByName: ${isParaformerModel ? "Paraformer" : "NeMo"} model files exist: $modelFilesExist (model.onnx=$modelFileExists, tokens=$tokensExists)',
+      );
+    } else {
+      // For Whisper models, joiner is not required
+      modelFilesExist =
+          encoderExists &&
+          decoderExists &&
+          tokensExists &&
+          (isWhisperModel || joinerExists);
+    }
 
     if (modelFilesExist) {
       print(
@@ -1796,18 +1916,77 @@ class SherpaOnnxSTTHelper {
       '[sherpa-onxx-sst] _verifyAndCopyModelFiles: - tokens.txt: $tokensExists',
     );
 
-    // Determine if this is a Whisper model (no joiner) or Zipformer model (has joiner)
-    // Check both enum and model name string
+    // Determine model type
     final isWhisperModel =
         (model != null &&
             (model == SherpaModelType.whisperTiny ||
                 model == SherpaModelType.whisperBase ||
                 model == SherpaModelType.whisperSmall)) ||
         (modelName != null && modelName.toLowerCase().contains('whisper'));
+    final isParaformerModel =
+        (model != null && model.modelName.contains('paraformer')) ||
+        (modelName != null && modelName.toLowerCase().contains('paraformer'));
+    final isNemoModel =
+        (model != null && model.modelName.contains('nemo')) ||
+        (modelName != null && modelName.toLowerCase().contains('nemo'));
 
     print(
       '[sherpa-onxx-sst] _verifyAndCopyModelFiles: Is Whisper model: $isWhisperModel (model=$model, modelName=$modelName)',
     );
+    print(
+      '[sherpa-onxx-sst] _verifyAndCopyModelFiles: Is Paraformer model: $isParaformerModel',
+    );
+    print(
+      '[sherpa-onxx-sst] _verifyAndCopyModelFiles: Is NeMo model: $isNemoModel',
+    );
+
+    // For Paraformer and NeMo models, check for model.onnx instead
+    if (isParaformerModel || isNemoModel) {
+      final modelFile = File('$modelDir/model.onnx');
+      final modelFileExists = await modelFile.exists();
+
+      if (modelFileExists && tokensExists) {
+        print(
+          '[sherpa-onxx-sst] _verifyAndCopyModelFiles: ✓ All required files exist in root (${isParaformerModel ? "Paraformer" : "NeMo"} model), no action needed',
+        );
+        return;
+      }
+
+      // Search for model.onnx in subdirectories
+      print(
+        '[sherpa-onxx-sst] _verifyAndCopyModelFiles: Some files missing, searching subdirectories for ${isParaformerModel ? "Paraformer" : "NeMo"} model...',
+      );
+      final foundFiles = await _findModelFiles(modelDir);
+
+      print('[sherpa-onxx-sst] _verifyAndCopyModelFiles: Found files:');
+      print(
+        '[sherpa-onxx-sst] _verifyAndCopyModelFiles: - model: ${foundFiles['model']?.path ?? "not found"}',
+      );
+      print(
+        '[sherpa-onxx-sst] _verifyAndCopyModelFiles: - tokens: ${foundFiles['tokens']?.path ?? "not found"}',
+      );
+
+      // Copy model.onnx to root if found
+      if (foundFiles['model'] != null && !modelFileExists) {
+        print(
+          '[sherpa-onxx-sst] _verifyAndCopyModelFiles: Copying model.onnx from ${foundFiles['model']!.path} to ${modelFile.path}',
+        );
+        await foundFiles['model']!.copy(modelFile.path);
+      }
+
+      // Copy tokens.txt to root if found
+      if (foundFiles['tokens'] != null && !tokensExists) {
+        print(
+          '[sherpa-onxx-sst] _verifyAndCopyModelFiles: Copying tokens.txt from ${foundFiles['tokens']!.path} to ${tokensFile.path}',
+        );
+        await foundFiles['tokens']!.copy(tokensFile.path);
+      }
+
+      print(
+        '[sherpa-onxx-sst] _verifyAndCopyModelFiles: Verification complete',
+      );
+      return;
+    }
 
     // For Whisper models, joiner is not required
     final requiredFilesExist =
