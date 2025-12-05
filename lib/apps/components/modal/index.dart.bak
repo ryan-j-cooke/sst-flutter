@@ -1,0 +1,322 @@
+import 'package:flutter/material.dart';
+import 'package:converselangages/app/components/cards/index.dart';
+import 'package:converselangages/app/components/bts/primary.dart';
+import 'package:converselangages/app/components/bts/secondary.dart';
+import 'package:converselangages/consts/theme.dart';
+import 'package:converselangages/intl/intl.dart';
+
+class AppModal extends StatelessWidget {
+  final String title;
+  final String? message;
+  final Widget? child;
+  final bool showLogo;
+  final VoidCallback? onClose;
+  final Future<void> Function()? onLogoClicked;
+  final double maxWidth;
+  final double maxHeightFactor;
+  final EdgeInsets? insetPadding;
+  final double padding;
+  final EdgeInsets? contentPadding;
+  final bool reduceRightPadding;
+  final bool showCloseButton;
+  final String? closeBtnText;
+  final String? confirmBtnText;
+  final VoidCallback? onConfirm;
+  final Color? closeBtnColor;
+  final Color? confirmBtnColor;
+
+  const AppModal({
+    super.key,
+    required this.title,
+    this.message,
+    this.child,
+    this.showLogo = true,
+    this.onClose,
+    this.onLogoClicked,
+    this.maxWidth = 520,
+    this.maxHeightFactor = 0.8,
+    this.insetPadding,
+    this.padding = 20,
+    this.contentPadding,
+    this.reduceRightPadding = false,
+    this.showCloseButton = true,
+    this.closeBtnText,
+    this.confirmBtnText,
+    this.onConfirm,
+    this.closeBtnColor,
+    this.confirmBtnColor,
+  });
+
+  /// Shows the AppModal as a dialog
+  static Future<T?> show<T>({
+    required BuildContext context,
+    required String title,
+    String? message,
+    Widget? child,
+    bool showLogo = true,
+    VoidCallback? onClose,
+    Future<void> Function()? onLogoClicked,
+    double maxWidth = 520,
+    double maxHeightFactor = 0.8,
+    EdgeInsets? insetPadding,
+    double padding = 20,
+    EdgeInsets? contentPadding,
+    bool reduceRightPadding = true,
+    bool barrierDismissible = true,
+    bool showCloseButton = true,
+    String? closeBtnText,
+    String? confirmBtnText,
+    VoidCallback? onConfirm,
+    Color? closeBtnColor,
+    Color? confirmBtnColor,
+  }) {
+    return showDialog<T>(
+      context: context,
+      barrierDismissible: barrierDismissible,
+      builder: (context) => AppModal(
+        title: title,
+        message: message,
+        child: child,
+        showLogo: showLogo,
+        onClose: onClose ?? () => Navigator.of(context).pop(),
+        onLogoClicked: onLogoClicked,
+        maxWidth: maxWidth,
+        maxHeightFactor: maxHeightFactor,
+        insetPadding: insetPadding,
+        padding: padding,
+        contentPadding: contentPadding,
+        reduceRightPadding: reduceRightPadding,
+        showCloseButton: showCloseButton,
+        closeBtnText: closeBtnText,
+        confirmBtnText: confirmBtnText,
+        onConfirm: onConfirm,
+        closeBtnColor: closeBtnColor,
+        confirmBtnColor: confirmBtnColor,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final closeCallback = onClose ?? () => Navigator.of(context).pop();
+    final translations = TranslationsManager.current.value;
+    final ct = translations?.translations('common') ?? TranslationContext({});
+    final showButtons = closeBtnText != null || confirmBtnText != null;
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      insetPadding:
+          insetPadding ??
+          const EdgeInsets.symmetric(horizontal: 15, vertical: 24),
+      child: GestureDetector(
+        onTap: showCloseButton
+            ? closeCallback
+            : null, // Only allow tap-to-close if close button is shown
+        behavior: HitTestBehavior.opaque,
+        child: Center(
+          child: GestureDetector(
+            onTap:
+                () {}, // Prevent tap from propagating when clicking on modal content
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: maxWidth,
+                maxHeight: MediaQuery.of(context).size.height * maxHeightFactor,
+              ),
+              child: Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.topCenter,
+                children: [
+                  // Fixed modal body (card without floating elements)
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight:
+                          MediaQuery.of(context).size.height * maxHeightFactor,
+                    ),
+                    child: Padding(
+                      padding: EdgeInsets.only(
+                        // right: reduceRightPadding
+                        //     ? (((padding * 0.5) - 15) * 0.5).clamp(
+                        //         0.0,
+                        //         double.infinity,
+                        //       )
+                        //     : 0, // Less padding on the right of modal body (reduced by half)
+                        right: 0,
+                      ),
+                      child: AppCard(
+                        title: title,
+                        message: message,
+                        showLogo:
+                            false, // Don't show logo in card, we'll add it separately
+                        onClose:
+                            null, // Don't show close in card, we'll add it separately
+                        onLogoClicked: null,
+                        maxWidth: maxWidth,
+                        padding: padding,
+                        contentPadding: EdgeInsets.only(
+                          right: contentPadding?.right ?? 0,
+                          left: contentPadding?.left ?? 0,
+                          top: contentPadding?.top ?? 0,
+                          bottom: contentPadding?.bottom ?? 0,
+                        ),
+                        bodyWidget: LayoutBuilder(
+                          builder: (context, constraints) {
+                            final availableHeight = MediaQuery.of(context).size.height *
+                                    maxHeightFactor -
+                                (showButtons
+                                    ? 220
+                                    : 150); // Reserve space for title, message, padding, and buttons if shown
+                            return SizedBox(
+                              height: availableHeight.clamp(0.0, double.infinity),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.max,
+                                children: [
+                                  // Scrollable content
+                                  Expanded(
+                                    child: ScrollbarTheme(
+                                      data: ScrollbarThemeData(
+                                        thickness: WidgetStateProperty.all(5.0),
+                                        radius: const Radius.circular(2.5),
+                                        thumbColor: WidgetStateProperty.all(
+                                          Colors.grey.withValues(alpha: 0.4),
+                                        ),
+                                      ),
+                                      child: Scrollbar(
+                                        thumbVisibility: true,
+                                        child: SingleChildScrollView(
+                                          child: Padding(
+                                            padding: EdgeInsets.only(
+                                              right: reduceRightPadding
+                                                  ? 0
+                                                  : 15, // No right padding when reduceRightPadding is true to make room for scrollbar
+                                            ),
+                                            child: child,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              // Buttons at bottom (always visible)
+                              if (showButtons) ...[
+                                const SizedBox(height: 16),
+                                Padding(
+                                  padding: EdgeInsets.only(
+                                    right: reduceRightPadding
+                                        ? padding * 0.75
+                                        : 0, // Add right padding to match the content padding when reduceRightPadding is true
+                                  ),
+                                  child: const Divider(),
+                                ),
+                                const SizedBox(height: 16),
+                                Padding(
+                                  padding: EdgeInsets.only(
+                                    right: reduceRightPadding
+                                        ? padding * 0.75
+                                        : 0, // Add right padding to match the content padding when reduceRightPadding is true
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      if (closeBtnText != null)
+                                        Expanded(
+                                          child: SecondaryButton(
+                                            title: closeBtnText ?? ct('close'),
+                                            onPressed: closeCallback,
+                                          ),
+                                        ),
+                                      if (closeBtnText != null &&
+                                          confirmBtnText != null)
+                                        const SizedBox(width: 12),
+                                      if (confirmBtnText != null)
+                                        Expanded(
+                                          child: PrimaryButton(
+                                            title:
+                                                confirmBtnText ?? ct('confirm'),
+                                            onPressed:
+                                                onConfirm ?? closeCallback,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Floating logo (positioned relative to modal container, not scrollable content)
+                  if (showLogo)
+                    Positioned(
+                      top: -66,
+                      child: GestureDetector(
+                        onTap: onLogoClicked,
+                        child: SizedBox(
+                          width: 100,
+                          height: 100,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              // Background logo
+                              Image.asset(
+                                'assets/images/logo-card-bg.png',
+                                width: 72 * 1.25,
+                                height: 72 * 1.15,
+                                fit: BoxFit.contain,
+                              ),
+                              // Foreground logo with offset
+                              Transform.translate(
+                                offset: const Offset(1, 15),
+                                child: Image.asset(
+                                  'assets/images/logo.png',
+                                  width: 72,
+                                  height: 72,
+                                  fit: BoxFit.contain,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                  // Floating close button (positioned relative to modal container, not scrollable content)
+                  if (showCloseButton)
+                    Positioned(
+                      top: -5,
+                      right: -5,
+                      child: GestureDetector(
+                        onTap: closeCallback,
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: AppColors.primary,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          alignment: Alignment.center,
+                          child: const Text(
+                            '×',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              height: 1,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

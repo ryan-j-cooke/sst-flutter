@@ -1,0 +1,92 @@
+import 'package:flutter/material.dart';
+import 'package:manual_speech_to_text/manual_speech_to_text.dart';
+
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Manual STT Example',
+      theme: ThemeData(primarySwatch: Colors.blue),
+      home: const SpeechTestPage(),
+    );
+  }
+}
+
+class SpeechTestPage extends StatefulWidget {
+  const SpeechTestPage({super.key});
+  @override
+  State<SpeechTestPage> createState() => _SpeechTestPageState();
+}
+
+class _SpeechTestPageState extends State<SpeechTestPage> {
+  late ManualSttController _sttController;
+  bool _isListening = false;
+  String _text = "Press the button and start speaking";
+
+  @override
+  void initState() {
+    super.initState();
+    _sttController = ManualSttController(context);
+
+    // Subscribe to the streams from manual_speech_to_text
+    _sttController.listen(
+      onListeningStateChanged: (ManualSttState state) {
+        setState(() {
+          _isListening = state == ManualSttState.listening;
+        });
+      },
+      onListeningTextChanged: (String newText) {
+        setState(() {
+          _text = newText;
+        });
+      },
+      onSoundLevelChanged: (double level) {
+        // Optionally, you can use sound level (e.g. for UI feedback)
+        // print("Sound level: $level");
+      },
+    );
+
+    // Set locale for Thai
+    _sttController.localId = 'th-TH';
+
+    // Disable sound and haptic feedback when listening starts
+    _sttController.enableHapticFeedback = false;
+  }
+
+  void _onMicPressed() {
+    if (!_isListening) {
+      // Start listening continuously
+      _sttController.startStt();
+    } else {
+      _sttController.stopStt();
+    }
+  }
+
+  @override
+  void dispose() {
+    _sttController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Manual STT Test')),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Text(_text, style: const TextStyle(fontSize: 24.0)),
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _onMicPressed,
+        child: Icon(_isListening ? Icons.mic : Icons.mic_none),
+      ),
+    );
+  }
+}

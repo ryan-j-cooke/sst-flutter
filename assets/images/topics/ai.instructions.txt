@@ -1,0 +1,4 @@
+1. do me an image infographic style like the first two.
+2. dimentions "1536x1024"
+3. for topic "At the train station"
+4. name the image the topic name in kebab case .png for e.g "at-the-train-station.png"

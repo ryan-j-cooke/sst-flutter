@@ -1,0 +1,81 @@
+# 🎨 Cartoon Chat Avatar Style Guide
+
+A consistent prompt and style reference for generating cartoon-style avatars for chat applications.
+
+---
+
+## 🧭 Prompt Template — “Cartoon Chat Avatar” Style
+
+> **Prompt:**
+>
+> A digital illustration in a clean, flat **cartoon avatar** style, featuring a [age group] [gender] with [hair color and style], drawn inside a **simple round frame** with a **transparent background**.  
+>
+> The character has a warm and friendly expression, minimal shading, smooth lines, and balanced proportions suitable for a **chat application profile icon**.  
+>
+> The art style should be consistent with a **modern flat vector aesthetic**, similar to **Avatar Creator app icons** or **Slack/Discord avatars**.
+>
+> **Style Attributes:**
+> - Smooth vector-like coloring (no textures or painterly effects)
+> - Bold outlines
+> - Minimal details
+> - Warm, natural tones
+> - Centered face and shoulders
+> - Framed in a circle
+> - **PNG** output with **transparent background**
+
+---
+
+## 🧍‍♀️ Example Subjects
+
+| Description | Key Features |
+|--------------|---------------|
+| **Child (Female)** | Young girl, blonde pigtails, coral shirt, bright smile |
+| **Teenage Girl** | Teenage female, blonde straight hair, teal shirt, cheerful look |
+| **Middle-Aged Woman** | Blonde shoulder-length hair, teal top, calm friendly smile |
+| **Old Woman** | Gray hair in low bun, glasses, soft expression, brown shirt |
+| **Old Man** | Gray hair and mustache, glasses, brown sweater, warm smile |
+| **Middle-Aged Man** | Short brown hair, light stubble, blue shirt, confident and approachable smile |
+
+---
+
+## 🧩 Example Full Prompt
+
+> “A digital illustration in a clean, flat cartoon avatar style featuring a **middle-aged man** with **short brown hair** and **light stubble**, smiling warmly.  
+> He wears a **blue shirt**.  
+> The design should have **bold outlines**, **minimal shading**, and a **friendly, professional expression**.  
+> Drawn inside a **circular frame** with a **transparent background**, **centered composition**, suitable for a **chat app profile icon**.”
+
+---
+
+## ⚙️ Technical Settings (Recommended)
+
+- **Output type:** PNG  
+- **Background:** Transparent  
+- **Canvas size:** 768×768 or 1024×1024  
+- **Framing:** Centered portrait within circular frame  
+- **Lighting:** Soft and even  
+- **Color palette:** Muted, natural tones  
+- **Expression:** Slight smile or friendly neutral  
+
+---
+
+## 🚫 Negative Prompt (What to Avoid)
+
+> - No realistic or photographic textures  
+> - No harsh lighting or dramatic shadows  
+> - No complex backgrounds or props  
+> - No strong perspective or full-body poses  
+> - No text or watermarks  
+
+---
+
+## 💡 Tips for Consistency
+
+1. Use the same **lighting and framing** across all avatars.  
+2. Keep the **color palette cohesive** (muted natural tones).  
+3. Always specify **“flat, clean cartoon style”** and **“transparent background”**.  
+4. Export at **1024×1024 PNG** for best quality and future resizing.  
+5. Maintain similar **eye level and shoulder framing** for all age groups.
+
+---
+

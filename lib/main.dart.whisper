@@ -1,0 +1,650 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
+import 'package:whisper_ggml/whisper_ggml.dart';
+
+void main() {
+  runApp(const MyApp());
+}
+
+// Whisper models - these are multilingual and support many languages
+enum WhisperModelType {
+  tiny('Tiny', WhisperModel.tiny, '~75 MB'),
+  base('Base', WhisperModel.base, '~142 MB'),
+  small('Small', WhisperModel.small, '~466 MB'),
+  medium('Medium', WhisperModel.medium, '~1.4 GB'),
+  large('Large', WhisperModel.large, '~2.94 GB');
+
+  final String displayName;
+  final WhisperModel model;
+  final String fileSize;
+
+  const WhisperModelType(this.displayName, this.model, this.fileSize);
+}
+
+// Language codes for Whisper (Whisper supports many languages automatically)
+const languages = [
+  Language('English', 'en'),
+  Language('Hebrew', 'he'),
+  Language('Français', 'fr'),
+  Language('ไทย', 'th'),
+  Language('中文', 'zh'),
+  Language('Pусский', 'ru'),
+  Language('Italiano', 'it'),
+  Language('Español', 'es'),
+  Language('Deutsch', 'de'),
+  Language('日本語', 'ja'),
+  Language('한국어', 'ko'),
+];
+
+class Language {
+  final String name;
+  final String code;
+
+  const Language(this.name, this.code);
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Whisper STT - Multilingual',
+      theme: ThemeData(primarySwatch: Colors.blue),
+      home: const SpeechTestPage(),
+    );
+  }
+}
+
+class SpeechTestPage extends StatefulWidget {
+  const SpeechTestPage({super.key});
+
+  @override
+  State<SpeechTestPage> createState() => _SpeechTestPageState();
+}
+
+class _SpeechTestPageState extends State<SpeechTestPage> {
+  final AudioRecorder _audioRecorder = AudioRecorder();
+  Whisper? _whisper;
+  String? _modelPath;
+
+  bool _isInitializing = false;
+  bool _isDownloading = false;
+  bool _isRecording = false;
+  bool _isTranscribing = false;
+  String _transcription = 'Press the button to start recording';
+  String _statusMessage = 'Initializing...';
+  String? _currentRecordingPath;
+  Duration _recordingDuration = Duration.zero;
+  Duration _transcriptionElapsedTime = Duration.zero;
+  Timer? _recordingTimer;
+  Timer? _transcriptionTimer;
+  bool _showOutput = false;
+
+  Language selectedLang = languages.firstWhere(
+    (l) => l.code == 'th',
+    orElse: () => languages.first,
+  );
+  WhisperModelType selectedModel = WhisperModelType.base;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeWhisper();
+  }
+
+  Future<void> _initializeWhisper() async {
+    setState(() {
+      _isInitializing = true;
+      _statusMessage = 'Initializing Whisper...';
+    });
+
+    try {
+      // Get model directory
+      final documentsDir = await getApplicationDocumentsDirectory();
+      final modelDir = '${documentsDir.path}/whisper_models';
+      await Directory(modelDir).create(recursive: true);
+
+      // Model file path
+      final modelFileName = 'ggml-${selectedModel.model.modelName}.bin';
+      _modelPath = '$modelDir/$modelFileName';
+
+      // Check if model exists, if not download it
+      final modelFile = File(_modelPath!);
+      if (!await modelFile.exists()) {
+        setState(() {
+          _isDownloading = true;
+          _statusMessage =
+              'Downloading ${selectedModel.displayName} model...\nThis may take a while...';
+        });
+        await _downloadModel();
+      }
+
+      // Initialize Whisper
+      _whisper = Whisper(model: selectedModel.model, modelDir: modelDir);
+
+      final version = await _whisper?.getVersion();
+      setState(() {
+        _isInitializing = false;
+        _isDownloading = false;
+        _statusMessage = 'Ready (Whisper v$version)';
+      });
+    } catch (e) {
+      setState(() {
+        _isInitializing = false;
+        _isDownloading = false;
+        _statusMessage = 'Error initializing: $e';
+      });
+      print('Error initializing Whisper: $e');
+    }
+  }
+
+  Future<void> _downloadModel() async {
+    try {
+      final modelUri = selectedModel.model.modelUri;
+      final client = HttpClient();
+      final request = await client.getUrl(modelUri);
+      final response = await request.close();
+
+      if (response.statusCode != 200) {
+        throw Exception('Failed to download model: ${response.statusCode}');
+      }
+
+      final file = File(_modelPath!);
+      final sink = file.openWrite();
+
+      int downloaded = 0;
+      await for (final data in response) {
+        sink.add(data);
+        downloaded += data.length;
+        if (mounted) {
+          setState(() {
+            _statusMessage =
+                'Downloading ${selectedModel.displayName} model...\n${(downloaded / 1024 / 1024).toStringAsFixed(1)} MB';
+          });
+        }
+      }
+      await sink.close();
+      client.close();
+    } catch (e) {
+      throw Exception('Error downloading model: $e');
+    }
+  }
+
+  Future<void> _startRecording() async {
+    try {
+      // Check permissions
+      if (await _audioRecorder.hasPermission() == false) {
+        setState(() {
+          _statusMessage = 'Microphone permission denied';
+        });
+        return;
+      }
+
+      // Get temporary directory for recording
+      final tempDir = await getTemporaryDirectory();
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      _currentRecordingPath = '${tempDir.path}/recording_$timestamp.wav';
+
+      // Start recording
+      await _audioRecorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.wav,
+          sampleRate: 16000,
+          numChannels: 1,
+        ),
+        path: _currentRecordingPath!,
+      );
+
+      setState(() {
+        _isRecording = true;
+        _transcription = 'Recording...';
+        _statusMessage = 'Recording audio...';
+        _recordingDuration = Duration.zero;
+      });
+
+      // Start timer to show recording duration
+      _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        setState(() {
+          _recordingDuration = Duration(seconds: timer.tick);
+        });
+      });
+    } catch (e) {
+      setState(() {
+        _isRecording = false;
+        _statusMessage = 'Error starting recording: $e';
+      });
+      print('Error starting recording: $e');
+    }
+  }
+
+  Future<void> _stopRecording() async {
+    try {
+      _recordingTimer?.cancel();
+      _recordingTimer = null;
+
+      final path = await _audioRecorder.stop();
+      if (path != null) {
+        _currentRecordingPath = path;
+      }
+
+      setState(() {
+        _isRecording = false;
+        _statusMessage = 'Recording stopped. Transcribing...';
+      });
+
+      // Automatically transcribe after stopping
+      await _transcribeAudio();
+    } catch (e) {
+      setState(() {
+        _isRecording = false;
+        _statusMessage = 'Error stopping recording: $e';
+      });
+      print('Error stopping recording: $e');
+    }
+  }
+
+  Future<void> _transcribeAudio() async {
+    if (_whisper == null ||
+        _currentRecordingPath == null ||
+        _modelPath == null) {
+      setState(() {
+        _statusMessage = 'Whisper not initialized or no recording available';
+      });
+      return;
+    }
+
+    final audioFile = File(_currentRecordingPath!);
+    if (!await audioFile.exists()) {
+      setState(() {
+        _statusMessage = 'Recording file not found';
+      });
+      return;
+    }
+
+    setState(() {
+      _isTranscribing = true;
+      _transcriptionElapsedTime = Duration.zero;
+      _statusMessage =
+          'Transcribing audio... (Elapsed: ${_formatDuration(_transcriptionElapsedTime)})';
+      _transcription = 'Processing...';
+      _showOutput = false;
+    });
+
+    // Start elapsed time timer
+    _transcriptionTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted) {
+        setState(() {
+          _transcriptionElapsedTime = Duration(seconds: timer.tick);
+          _statusMessage =
+              'Transcribing audio... (Elapsed: ${_formatDuration(_transcriptionElapsedTime)})';
+        });
+      }
+    });
+
+    try {
+      final response = await _whisper!.transcribe(
+        transcribeRequest: TranscribeRequest(
+          audio: _currentRecordingPath!,
+          isTranslate: false, // Set to true to translate to English
+          isNoTimestamps: true, // Set to false to include timestamps
+          splitOnWord: false,
+          language: selectedLang.code,
+          isRealtime: _showOutput, // Enable real-time mode if showing output
+        ),
+        modelPath: _modelPath!,
+      );
+
+      _transcriptionTimer?.cancel();
+      _transcriptionTimer = null;
+
+      setState(() {
+        _isTranscribing = false;
+        _transcription = response.text.isNotEmpty
+            ? response.text
+            : 'No transcription available';
+        _statusMessage = 'Transcription complete';
+      });
+    } catch (e) {
+      _transcriptionTimer?.cancel();
+      _transcriptionTimer = null;
+      setState(() {
+        _isTranscribing = false;
+        _statusMessage = 'Error transcribing: $e';
+        _transcription = 'Error: $e';
+      });
+      print('Error transcribing: $e');
+    }
+  }
+
+  Future<void> _changeModel(WhisperModelType model) async {
+    if (model == selectedModel) return;
+
+    setState(() {
+      selectedModel = model;
+      _isInitializing = true;
+      _statusMessage = 'Loading ${model.displayName} model...';
+      _transcription = 'Press the button to start recording';
+    });
+
+    try {
+      // Get model directory
+      final documentsDir = await getApplicationDocumentsDirectory();
+      final modelDir = '${documentsDir.path}/whisper_models';
+      await Directory(modelDir).create(recursive: true);
+
+      // Model file path
+      final modelFileName = 'ggml-${model.model.modelName}.bin';
+      _modelPath = '$modelDir/$modelFileName';
+
+      // Check if model exists, if not download it
+      final modelFile = File(_modelPath!);
+      if (!await modelFile.exists()) {
+        setState(() {
+          _isDownloading = true;
+          _statusMessage =
+              'Downloading ${model.displayName} model...\nThis may take a while...';
+        });
+        await _downloadModel();
+      }
+
+      // Initialize Whisper
+      _whisper = Whisper(model: model.model, modelDir: modelDir);
+
+      final version = await _whisper?.getVersion();
+      setState(() {
+        _isInitializing = false;
+        _isDownloading = false;
+        _statusMessage = 'Ready (${model.displayName} model, v$version)';
+      });
+    } catch (e) {
+      setState(() {
+        _isInitializing = false;
+        _isDownloading = false;
+        _statusMessage = 'Error loading model: $e';
+      });
+      print('Error changing model: $e');
+    }
+  }
+
+  Future<void> _changeLanguage(Language lang) async {
+    setState(() {
+      selectedLang = lang;
+    });
+  }
+
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final minutes = twoDigits(duration.inMinutes.remainder(60));
+    final seconds = twoDigits(duration.inSeconds.remainder(60));
+    return '$minutes:$seconds';
+  }
+
+  @override
+  void dispose() {
+    _recordingTimer?.cancel();
+    _transcriptionTimer?.cancel();
+    _audioRecorder.dispose();
+    _whisper = null;
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Whisper STT - Multilingual'),
+        actions: [
+          // Model selector
+          PopupMenuButton<WhisperModelType>(
+            onSelected: _changeModel,
+            itemBuilder: (BuildContext context) => WhisperModelType.values
+                .map(
+                  (m) => CheckedPopupMenuItem<WhisperModelType>(
+                    value: m,
+                    checked: selectedModel == m,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(m.displayName),
+                        Text(
+                          m.fileSize,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+                .toList(),
+          ),
+          // Language selector
+          PopupMenuButton<Language>(
+            onSelected: _changeLanguage,
+            itemBuilder: (BuildContext context) => languages
+                .map(
+                  (l) => CheckedPopupMenuItem<Language>(
+                    value: l,
+                    checked: selectedLang == l,
+                    child: Text(l.name),
+                  ),
+                )
+                .toList(),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 20),
+              // Status message
+              Container(
+                padding: const EdgeInsets.all(12.0),
+                decoration: BoxDecoration(
+                  color: _isInitializing || _isTranscribing || _isDownloading
+                      ? Colors.orange[50]
+                      : _statusMessage.contains('Error')
+                      ? Colors.red[50]
+                      : Colors.green[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: _isInitializing || _isTranscribing || _isDownloading
+                        ? Colors.orange[200]!
+                        : _statusMessage.contains('Error')
+                        ? Colors.red[200]!
+                        : Colors.green[200]!,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    if (_isInitializing || _isTranscribing || _isDownloading)
+                      const Padding(
+                        padding: EdgeInsets.only(right: 8.0),
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                    Expanded(
+                      child: Text(
+                        _statusMessage,
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Transcription elapsed time
+              if (_isTranscribing)
+                Container(
+                  padding: const EdgeInsets.all(12.0),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange[200]!),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.hourglass_empty,
+                        color: Colors.orange[700],
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Processing: ${_formatDuration(_transcriptionElapsedTime)}',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.orange[700],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              // Recording duration
+              if (_isRecording)
+                Container(
+                  padding: const EdgeInsets.all(12.0),
+                  decoration: BoxDecoration(
+                    color: Colors.red[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red[200]!),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.mic, color: Colors.red[700], size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        _formatDuration(_recordingDuration),
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.red[700],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 16),
+              // Transcription result
+              Container(
+                padding: const EdgeInsets.all(16.0),
+                decoration: BoxDecoration(
+                  color: Colors.blue[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue[200]!),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Transcription:',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      height: 200,
+                      child: SingleChildScrollView(
+                        child: Text(
+                          _isTranscribing && !_showOutput
+                              ? 'Processing... (Click "See Output" below to view real-time progress)'
+                              : _transcription,
+                          style: const TextStyle(fontSize: 18),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 32),
+              // Model and language info
+              Text(
+                'Model: ${selectedModel.displayName} (${selectedModel.fileSize}) | Language: ${selectedLang.name} (${selectedLang.code})',
+                style: const TextStyle(fontSize: 14),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              // Record button
+              ElevatedButton.icon(
+                onPressed:
+                    (_isInitializing || _isTranscribing || _isDownloading)
+                    ? null
+                    : (_isRecording ? _stopRecording : _startRecording),
+                icon: Icon(_isRecording ? Icons.stop : Icons.mic, size: 24),
+                label: Text(
+                  _isRecording ? 'Stop Recording' : 'Start Recording',
+                  style: const TextStyle(fontSize: 18),
+                ),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 32,
+                    vertical: 16,
+                  ),
+                  backgroundColor: _isRecording ? Colors.red : Colors.green,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+              // See Output button
+              if (_isTranscribing)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12.0),
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        _showOutput = !_showOutput;
+                      });
+                    },
+                    icon: Icon(
+                      _showOutput ? Icons.visibility_off : Icons.visibility,
+                      size: 20,
+                    ),
+                    label: Text(_showOutput ? 'Hide Output' : 'See Output'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _showOutput ? Colors.grey : Colors.blue,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+              // Transcribe button (if we have a recording but haven't transcribed)
+              if (!_isRecording &&
+                  _currentRecordingPath != null &&
+                  !_isTranscribing &&
+                  _transcription == 'Press the button to start recording')
+                Padding(
+                  padding: const EdgeInsets.only(top: 12.0),
+                  child: ElevatedButton.icon(
+                    onPressed: _transcribeAudio,
+                    icon: const Icon(Icons.transcribe, size: 20),
+                    label: const Text('Transcribe Last Recording'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
