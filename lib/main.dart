@@ -5,6 +5,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart';
 import 'package:stttest/apps/components/bts/sst/sherpa-onnx-btn.dart';
 import 'package:stttest/apps/components/download-card/index.dart';
+import 'package:stttest/apps/components/modal/index.dart';
 import 'package:stttest/consts/languages.dart';
 import 'package:stttest/utils/sherpa-model-dictionary.dart';
 import 'package:stttest/utils/sherpa-onxx-sst.dart';
@@ -180,7 +181,7 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
 
   Future<void> _initializeTts() async {
     _flutterTts = FlutterTts();
-    
+
     // Set language based on selected language
     if (selectedLang != null) {
       final langCode = selectedLang!.code.contains('-')
@@ -188,19 +189,19 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
           : selectedLang!.code;
       await _flutterTts?.setLanguage(_getTtsLanguageCode(langCode));
     }
-    
+
     // Set speech rate and volume
     await _flutterTts?.setSpeechRate(0.5);
     await _flutterTts?.setVolume(1.0);
     await _flutterTts?.setPitch(1.0);
-    
+
     // Set completion handler
     _flutterTts?.setCompletionHandler(() {
       setState(() {
         _isSpeaking = false;
       });
     });
-    
+
     // Set error handler
     _flutterTts?.setErrorHandler((msg) {
       print('[main.dart] TTS Error: $msg');
@@ -210,25 +211,9 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
     });
   }
 
-  /// Convert language code to TTS language code
+  /// Convert language code to TTS language code using LanguageConstants
   String _getTtsLanguageCode(String langCode) {
-    // Map common language codes to TTS language codes
-    const langMap = {
-      'en': 'en-US',
-      'th': 'th-TH',
-      'zh': 'zh-CN',
-      'ru': 'ru-RU',
-      'ko': 'ko-KR',
-      'ja': 'ja-JP',
-      'fr': 'fr-FR',
-      'es': 'es-ES',
-      'de': 'de-DE',
-      'vi': 'vi-VN',
-      'ar': 'ar-SA',
-      'pt': 'pt-BR',
-      'id': 'id-ID',
-    };
-    return langMap[langCode] ?? 'en-US';
+    return LanguageConstants.getTtsLanguageCode(langCode);
   }
 
   /// Speak the transcribed text
@@ -510,24 +495,23 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
     print('[main.dart] _showModelDownloadDialogForLanguage: Showing dialog...');
     // Show dialog with all models (even if already downloaded)
     // Pass languageCode and let ModelDownloadCard fetch models itself
-    final result = await showDialog<bool>(
+    final result = await AppModal.show<bool>(
       context: context,
-      barrierColor: Colors.black.withOpacity(0.5), // Transparent overlay
-      barrierDismissible: true, // Allow dismissing by tapping outside
-      builder: (context) => Dialog(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        child: ModelDownloadCard(
-          requiredModels: [], // Empty - will be populated from languageCode
-          languageCode: normalizedCode, // Pass normalized code
-          onAllModelsDownloaded: () {
-            print(
-              '[main.dart] _showModelDownloadDialogForLanguage: onAllModelsDownloaded called',
-            );
-            Navigator.of(context).pop(true);
-          },
-        ),
+      title: 'Download Models',
+      child: ModelDownloadCard(
+        requiredModels: [], // Empty - will be populated from languageCode
+        languageCode: normalizedCode, // Pass normalized code
+        onAllModelsDownloaded: () {
+          print(
+            '[main.dart] _showModelDownloadDialogForLanguage: onAllModelsDownloaded called',
+          );
+          Navigator.of(context).pop(true);
+        },
       ),
+      barrierDismissible: true,
+      showCloseButton: true,
+      maxWidth: 600,
+      maxHeightFactor: 0.8,
     );
 
     print(
@@ -593,20 +577,20 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
     // Use the provided model or default to first available
     final modelsToDownload = model != null ? [model] : availableModels;
 
-    final result = await showDialog<bool>(
+    final result = await AppModal.show<bool>(
       context: context,
-      barrierColor: Colors.black.withOpacity(0.5), // Transparent overlay
-      builder: (context) => Dialog(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        child: ModelDownloadCard(
-          requiredModels: modelsToDownload,
-          languageCode: selectedLang!.code,
-          onAllModelsDownloaded: () {
-            Navigator.of(context).pop(true);
-          },
-        ),
+      title: 'Download Models',
+      child: ModelDownloadCard(
+        requiredModels: modelsToDownload,
+        languageCode: selectedLang!.code,
+        onAllModelsDownloaded: () {
+          Navigator.of(context).pop(true);
+        },
       ),
+      barrierDismissible: true,
+      showCloseButton: true,
+      maxWidth: 600,
+      maxHeightFactor: 0.8,
     );
 
     if (result == true && mounted && selectedLang != null) {
@@ -672,9 +656,8 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
       _transcription = transcribedText;
       _statusMessage = 'Transcription complete (${percentage}% match)';
     });
-    
-    // Automatically speak the transcribed text
-    _speakText(transcribedText);
+
+    // TTS is only invoked manually by tapping the transcription area
   }
 
   @override
@@ -869,7 +852,8 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
                 GestureDetector(
                   onTap: () {
                     if (_transcription.isNotEmpty &&
-                        _transcription != 'Press the button to start recording') {
+                        _transcription !=
+                            'Press the button to start recording') {
                       if (_isSpeaking) {
                         _stopSpeaking();
                       } else {
@@ -902,8 +886,12 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
                                 _transcription !=
                                     'Press the button to start recording')
                               Icon(
-                                _isSpeaking ? Icons.volume_up : Icons.volume_down,
-                                color: _isSpeaking ? Colors.blue[700] : Colors.grey,
+                                _isSpeaking
+                                    ? Icons.volume_up
+                                    : Icons.volume_down,
+                                color: _isSpeaking
+                                    ? Colors.blue[700]
+                                    : Colors.grey,
                                 size: 20,
                               ),
                           ],
@@ -919,7 +907,8 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
                           ),
                         ),
                         if (_transcription.isNotEmpty &&
-                            _transcription != 'Press the button to start recording')
+                            _transcription !=
+                                'Press the button to start recording')
                           Padding(
                             padding: const EdgeInsets.only(top: 8.0),
                             child: Text(

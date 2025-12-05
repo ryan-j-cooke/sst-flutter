@@ -444,4 +444,86 @@ class LanguageConstants {
           MapEntry(key, {'name': value['name']!, 'flag': value['flag']!}),
     );
   }
+
+  /// Get TTS language code for a given language code
+  /// Returns the appropriate locale code for text-to-speech engines
+  /// If the language code already has a region (e.g., 'zh-CN'), uses it directly
+  /// Otherwise, maps to the appropriate TTS locale (e.g., 'en' -> 'en-US')
+  static String getTtsLanguageCode(String languageCode) {
+    // Normalize language code (remove region if present for lookup)
+    final normalizedCode = languageCode.contains('-')
+        ? languageCode.split('-').first
+        : languageCode;
+
+    // Check if we have an entry with region code already
+    if (languages.containsKey(languageCode)) {
+      // Use the language code as-is if it's already in the map
+      return languageCode;
+    }
+
+    // Check if we have the normalized code
+    if (languages.containsKey(normalizedCode)) {
+      // Map normalized codes to TTS locale codes
+      const ttsLocaleMap = {
+        'en': 'en-US',
+        'th': 'th-TH',
+        'zh': 'zh-CN',
+        'ru': 'ru-RU',
+        'ko': 'ko-KR',
+        'ja': 'ja-JP',
+        'fr': 'fr-FR',
+        'es': 'es-ES',
+        'de': 'de-DE',
+        'vi': 'vi-VN',
+        'ar': 'ar-SA',
+        'pt': 'pt-BR',
+        'id': 'id-ID',
+        'it': 'it-IT',
+        'hi': 'hi-IN',
+        'bn': 'bn-BD',
+        'ms': 'ms-MY',
+        'tr': 'tr-TR',
+        'pl': 'pl-PL',
+        'nl': 'nl-NL',
+        'sv': 'sv-SE',
+        'no': 'no-NO',
+        'fi': 'fi-FI',
+        'da': 'da-DK',
+        'el': 'el-GR',
+        'he': 'he-IL',
+        'ro': 'ro-RO',
+        'hu': 'hu-HU',
+        'cs': 'cs-CZ',
+        'sk': 'sk-SK',
+        'bg': 'bg-BG',
+        'uk': 'uk-UA',
+        'hr': 'hr-HR',
+        'sr': 'sr-RS',
+        'sl': 'sl-SI',
+        'lt': 'lt-LT',
+        'lv': 'lv-LV',
+        'et': 'et-EE',
+        'fa': 'fa-IR',
+        'ta': 'ta-IN',
+        'te': 'te-IN',
+        'kn': 'kn-IN',
+        'ml': 'ml-IN',
+        'mr': 'mr-IN',
+        'ur': 'ur-PK',
+        'sw': 'sw-TZ',
+        'tl': 'tl-PH',
+        'zu': 'zu-ZA',
+        'xh': 'xh-ZA',
+        'st': 'st-ZA',
+        'so': 'so-SO',
+        'yo': 'yo-NG',
+        'am': 'am-ET',
+      };
+
+      return ttsLocaleMap[normalizedCode] ?? 'en-US';
+    }
+
+    // Fallback to en-US if language not found
+    return 'en-US';
+  }
 }
