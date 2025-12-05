@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:stttest/utils/sherpa-onxx-sst.dart';
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
 
 /// Model download status
 enum ModelDownloadStatus { notDownloaded, downloading, downloaded, error }
@@ -182,6 +184,447 @@ class DownloadListItem extends StatelessWidget {
     }
   }
 
+  /// Show dialog with manual action options
+  void _showManualActionsDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Manual Actions: ${modelInfo.displayName}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                _showDownloadDialog(context);
+              },
+              icon: const Icon(Icons.download),
+              label: const Text('Download Model'),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                _showExtractDialog(context);
+              },
+              icon: const Icon(Icons.unarchive),
+              label: const Text('Extract Model'),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                _showVerifyDialog(context);
+              },
+              icon: const Icon(Icons.verified),
+              label: const Text('Verify Model'),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                _showInitializeDialog(context);
+              },
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('Initialize Model'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Show download progress dialog
+  Future<void> _showDownloadDialog(BuildContext context) async {
+    final output = <String>[];
+    bool isComplete = false;
+    String? error;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: Text('Downloading: ${modelInfo.displayName}'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (!isComplete && error == null)
+                    const CircularProgressIndicator(),
+                  if (error != null)
+                    Text(
+                      'Error: $error',
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                  if (isComplete && error == null)
+                    const Icon(
+                      Icons.check_circle,
+                      color: Colors.green,
+                      size: 48,
+                    ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    height: 200,
+                    child: SingleChildScrollView(
+                      child: Text(
+                        output.isEmpty
+                            ? 'Starting download...'
+                            : output.join('\n'),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isComplete || error != null
+                    ? () => Navigator.pop(context)
+                    : null,
+                child: const Text('Close'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    try {
+      final documentsDir = await getApplicationDocumentsDirectory();
+      final modelDir =
+          '${documentsDir.path}/sherpa_onnx_models/${modelInfo.modelName}';
+
+      await Directory(modelDir).create(recursive: true);
+
+      await SherpaOnnxSTTHelper.downloadModelByName(
+        modelInfo.modelName,
+        modelDir,
+        displayName: modelInfo.displayName,
+        onProgress: (downloaded, total) {
+          if (context.mounted) {
+            final percent = total != null
+                ? (downloaded / total * 100).toStringAsFixed(1)
+                : '?';
+            output.add(
+              'Downloaded: ${(downloaded / 1024 / 1024).toStringAsFixed(2)} MB / ${total != null ? (total / 1024 / 1024).toStringAsFixed(2) : "?"} MB ($percent%)',
+            );
+            (context as Element).markNeedsBuild();
+          }
+        },
+        onExtractionProgress: (progress, status) {
+          if (context.mounted) {
+            output.add('Extraction: ${progress.toStringAsFixed(1)}% - $status');
+            (context as Element).markNeedsBuild();
+          }
+        },
+      );
+
+      if (context.mounted) {
+        output.add('✓ Download and extraction complete!');
+        isComplete = true;
+        (context as Element).markNeedsBuild();
+        onRefreshStatus?.call();
+      }
+    } catch (e) {
+      if (context.mounted) {
+        error = e.toString();
+        output.add('✗ Error: $e');
+        (context as Element).markNeedsBuild();
+      }
+    }
+  }
+
+  /// Show extract progress dialog
+  Future<void> _showExtractDialog(BuildContext context) async {
+    final output = <String>[];
+    bool isComplete = false;
+    String? error;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: Text('Extracting: ${modelInfo.displayName}'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (!isComplete && error == null)
+                    const CircularProgressIndicator(),
+                  if (error != null)
+                    Text(
+                      'Error: $error',
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                  if (isComplete && error == null)
+                    const Icon(
+                      Icons.check_circle,
+                      color: Colors.green,
+                      size: 48,
+                    ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    height: 200,
+                    child: SingleChildScrollView(
+                      child: Text(
+                        output.isEmpty
+                            ? 'Starting extraction...'
+                            : output.join('\n'),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isComplete || error != null
+                    ? () => Navigator.pop(context)
+                    : null,
+                child: const Text('Close'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final zipFile = File('${tempDir.path}/${modelInfo.modelName}.tar.bz2');
+      final documentsDir = await getApplicationDocumentsDirectory();
+      final modelDir =
+          '${documentsDir.path}/sherpa_onnx_models/${modelInfo.modelName}';
+
+      if (!await zipFile.exists()) {
+        throw Exception('Compressed file not found: ${zipFile.path}');
+      }
+
+      output.add('Found compressed file: ${zipFile.path}');
+      if (context.mounted) (context as Element).markNeedsBuild();
+
+      await Directory(modelDir).create(recursive: true);
+
+      // Use downloadModelByName which handles extraction
+      await SherpaOnnxSTTHelper.downloadModelByName(
+        modelInfo.modelName,
+        modelDir,
+        displayName: modelInfo.displayName,
+        onExtractionProgress: (progress, status) {
+          if (context.mounted) {
+            output.add('$status (${progress.toStringAsFixed(1)}%)');
+            (context as Element).markNeedsBuild();
+          }
+        },
+      );
+
+      if (context.mounted) {
+        output.add('✓ Extraction complete!');
+        isComplete = true;
+        (context as Element).markNeedsBuild();
+        onRefreshStatus?.call();
+      }
+    } catch (e) {
+      if (context.mounted) {
+        error = e.toString();
+        output.add('✗ Error: $e');
+        (context as Element).markNeedsBuild();
+      }
+    }
+  }
+
+  /// Show verify dialog
+  Future<void> _showVerifyDialog(BuildContext context) async {
+    final output = <String>[];
+    bool isComplete = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: Text('Verifying: ${modelInfo.displayName}'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (!isComplete) const CircularProgressIndicator(),
+                  if (isComplete)
+                    const Icon(
+                      Icons.check_circle,
+                      color: Colors.green,
+                      size: 48,
+                    ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    height: 200,
+                    child: SingleChildScrollView(
+                      child: Text(
+                        output.isEmpty
+                            ? 'Verifying model files...'
+                            : output.join('\n'),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isComplete ? () => Navigator.pop(context) : null,
+                child: const Text('Close'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    try {
+      output.add('Checking model: ${modelInfo.modelName}');
+      if (context.mounted) (context as Element).markNeedsBuild();
+
+      await SherpaOnnxSTTHelper.debugModel(
+        modelInfo.modelName,
+        displayName: modelInfo.displayName,
+      );
+
+      final exists = await SherpaOnnxSTTHelper.modelExistsByName(
+        modelInfo.modelName,
+      );
+
+      if (context.mounted) {
+        output.add('Model exists: $exists');
+        if (exists) {
+          output.add('✓ All required files are present');
+        } else {
+          output.add('✗ Model files are missing');
+        }
+        isComplete = true;
+        (context as Element).markNeedsBuild();
+      }
+    } catch (e) {
+      if (context.mounted) {
+        output.add('✗ Error: $e');
+        isComplete = true;
+        (context as Element).markNeedsBuild();
+      }
+    }
+  }
+
+  /// Show initialize dialog
+  Future<void> _showInitializeDialog(BuildContext context) async {
+    final output = <String>[];
+    bool isComplete = false;
+    String? error;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: Text('Initializing: ${modelInfo.displayName}'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (!isComplete && error == null)
+                    const CircularProgressIndicator(),
+                  if (error != null)
+                    Text(
+                      'Error: $error',
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                  if (isComplete && error == null)
+                    const Icon(
+                      Icons.check_circle,
+                      color: Colors.green,
+                      size: 48,
+                    ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    height: 200,
+                    child: SingleChildScrollView(
+                      child: Text(
+                        output.isEmpty
+                            ? 'Initializing recognizer...'
+                            : output.join('\n'),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isComplete || error != null
+                    ? () => Navigator.pop(context)
+                    : null,
+                child: const Text('Close'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    try {
+      output.add('Initializing model: ${modelInfo.modelName}');
+      if (context.mounted) (context as Element).markNeedsBuild();
+
+      await SherpaOnnxSTTHelper.initializeRecognizerByName(
+        modelInfo.modelName,
+        displayName: modelInfo.displayName,
+      );
+
+      if (context.mounted) {
+        output.add('✓ Recognizer initialized successfully');
+        output.add('Model is ready for transcription');
+        isComplete = true;
+        (context as Element).markNeedsBuild();
+      }
+    } catch (e) {
+      if (context.mounted) {
+        error = e.toString();
+        output.add('✗ Error: $e');
+        (context as Element).markNeedsBuild();
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDownloaded = modelInfo.status == ModelDownloadStatus.downloaded;
@@ -205,6 +648,9 @@ class DownloadListItem extends StatelessWidget {
         if (modelExists && modelInfo.status != ModelDownloadStatus.downloaded) {
           onRefreshStatus?.call();
         }
+      },
+      onLongPress: () {
+        _showManualActionsDialog(context);
       },
       child: Container(
         margin: const EdgeInsets.only(bottom: 6),
