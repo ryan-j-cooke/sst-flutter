@@ -127,9 +127,14 @@ class Language {
 // Model selection data structure
 class LanguageModelSelection {
   final Language language;
-  final SherpaModelType? model; // null means use default
+  final SherpaModelType? model; // null means use default or custom model
+  final String? customModelName; // For custom models not in enum
 
-  const LanguageModelSelection(this.language, [this.model]);
+  const LanguageModelSelection(
+    this.language, [
+    this.model,
+    this.customModelName,
+  ]);
 }
 
 class MyApp extends StatelessWidget {
@@ -159,6 +164,7 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
 
   Language? selectedLang;
   SherpaModelType? selectedModel;
+  String? selectedCustomModelName; // For custom models not in enum
 
   @override
   void initState() {
@@ -228,10 +234,11 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
 
   Future<void> _loadModelForLanguage(
     String languageCode,
-    SherpaModelType? specificModel,
-  ) async {
+    SherpaModelType? specificModel, {
+    String? customModelName,
+  }) async {
     print(
-      '[main.dart] _loadModelForLanguage: languageCode=$languageCode, specificModel=${specificModel?.displayName}',
+      '[main.dart] _loadModelForLanguage: languageCode=$languageCode, specificModel=${specificModel?.displayName}, customModelName=$customModelName',
     );
 
     // Normalize language code
@@ -242,11 +249,13 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
 
     // Determine which model to use
     SherpaModelType? modelToUse = specificModel;
+    String? modelNameToUse = customModelName;
+
     print(
       '[main.dart] _loadModelForLanguage: modelToUse (from specificModel)=${modelToUse?.displayName}',
     );
 
-    if (modelToUse == null) {
+    if (modelToUse == null && modelNameToUse == null) {
       // Get saved model preference
       final savedModel = await TutorService.getModelPriority(normalizedCode);
       print(
@@ -257,7 +266,7 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
       }
     }
 
-    if (modelToUse == null) {
+    if (modelToUse == null && modelNameToUse == null) {
       // Get default model from dictionary
       final defaultVariant = SherpaModelDictionary.getDefaultModelForLanguage(
         normalizedCode,
@@ -265,12 +274,16 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
       print(
         '[main.dart] _loadModelForLanguage: defaultVariant from dictionary=${defaultVariant?.displayName}',
       );
-      if (defaultVariant != null && defaultVariant.model != null) {
-        modelToUse = defaultVariant.model;
+      if (defaultVariant != null) {
+        if (defaultVariant.model != null) {
+          modelToUse = defaultVariant.model;
+        } else if (defaultVariant.customModelName != null) {
+          modelNameToUse = defaultVariant.customModelName;
+        }
       }
     }
 
-    if (modelToUse == null) {
+    if (modelToUse == null && modelNameToUse == null) {
       print('[main.dart] _loadModelForLanguage: ERROR - No model found!');
       setState(() {
         _isInitializing = false;
@@ -279,15 +292,12 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
       return;
     }
 
-    print(
-      '[main.dart] _loadModelForLanguage: Final modelToUse=${modelToUse.displayName} (${modelToUse.modelName})',
-    );
-
     // Check if model exists locally
     print(
       '[main.dart] _loadModelForLanguage: Checking if model exists locally...',
     );
-    final exists = await SherpaOnnxSTTHelper.modelExists(modelToUse);
+    final modelName = modelToUse?.modelName ?? modelNameToUse!;
+    final exists = await SherpaOnnxSTTHelper.modelExistsByName(modelName);
     print('[main.dart] _loadModelForLanguage: Model exists=$exists');
 
     if (exists) {
@@ -295,7 +305,8 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
         '[main.dart] _loadModelForLanguage: Model exists, setting selectedModel and initializing...',
       );
       setState(() {
-        selectedModel = modelToUse;
+        selectedModel =
+            modelToUse; // May be null for custom models, but that's OK
       });
       await _initializeSherpa();
     } else {
@@ -303,7 +314,7 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
         '[main.dart] _loadModelForLanguage: Model does not exist, showing download dialog...',
       );
       // Model doesn't exist, show download dialog
-      await _showModelDownloadDialog(modelToUse);
+      await _showModelDownloadDialog(modelToUse, modelName: modelNameToUse);
     }
   }
 
@@ -350,7 +361,72 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
     }
   }
 
-  Future<void> _showModelDownloadDialog(SherpaModelType? model) async {
+  /// Show download modal for a specific language (shows all models)
+  Future<void> _showModelDownloadDialogForLanguage(String languageCode) async {
+    if (!mounted) return;
+
+    // Normalize language code
+    final normalizedCode = languageCode.contains('-')
+        ? languageCode.split('-').first
+        : languageCode;
+
+    // Get all available models for this language (both enum and custom)
+    final allModels = SherpaModelDictionary.getModelsForLanguage(
+      normalizedCode,
+    );
+
+    if (allModels.isEmpty) {
+      setState(() {
+        _statusMessage = 'No models available for this language';
+      });
+      return;
+    }
+
+    // Get all enum models (for ModelDownloadCard)
+    final enumModels = allModels
+        .where((m) => m.model != null)
+        .map((m) => m.model!)
+        .toList();
+
+    // Show dialog with all models (even if already downloaded)
+    final result = await showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.5), // Transparent overlay
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        child: ModelDownloadCard(
+          requiredModels: enumModels.isNotEmpty ? enumModels : [],
+          languageCode: languageCode,
+          onAllModelsDownloaded: () {
+            Navigator.of(context).pop(true);
+          },
+        ),
+      ),
+    );
+
+    if (result == true && mounted && selectedLang != null) {
+      // Model downloaded and saved (step-2 saves via TutorService)
+      // Reload the saved model preference
+      final savedModel = await TutorService.getModelPriority(normalizedCode);
+      if (savedModel != null) {
+        selectedModel = savedModel;
+        selectedCustomModelName = null;
+        await _initializeSherpa();
+      } else if (enumModels.isNotEmpty) {
+        // Use first available model
+        selectedModel = enumModels.first;
+        selectedCustomModelName = null;
+        await TutorService.saveModelPriority(normalizedCode, enumModels.first);
+        await _initializeSherpa();
+      }
+    }
+  }
+
+  Future<void> _showModelDownloadDialog(
+    SherpaModelType? model, {
+    String? modelName,
+  }) async {
     if (!mounted || selectedLang == null) return;
 
     // Get all available models for this language
@@ -417,24 +493,24 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
 
   Future<void> _changeLanguageOrModel(LanguageModelSelection selection) async {
     final lang = selection.language;
-    final model = selection.model;
+
+    // Update UI immediately to show selection (this happens before menu closes)
+    setState(() {
+      selectedLang = lang;
+      _transcription = 'Press the button to start recording';
+      _statusMessage = 'Loading model for ${lang.name}...';
+    });
 
     // Close the menu first by scheduling the processing after the current frame
     // This ensures the menu closes before we start the potentially long-running operation
     await Future.microtask(() async {
       // Small delay to ensure menu closes visually
-      await Future.delayed(const Duration(milliseconds: 100));
+      await Future.delayed(const Duration(milliseconds: 200));
 
       if (!mounted) return;
 
-      setState(() {
-        selectedLang = lang;
-        _transcription = 'Press the button to start recording';
-        _statusMessage = 'Loading model for ${lang.name}...';
-      });
-
-      // Load model for new language (or specific model if selected)
-      await _loadModelForLanguage(lang.code, model);
+      // Always show download modal with all models for this language
+      await _showModelDownloadDialogForLanguage(lang.code);
     });
   }
 
@@ -525,29 +601,27 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
                   ),
                 );
 
-                // Add languages in this group
+                // Add languages in this group (simplified - no model sub-items)
                 for (final lang in groupLangs) {
-                  final models = lang.models ?? [];
-
-                  // Filter to only show models with enum values (supported models)
-                  final supportedModels = models
-                      .where((m) => m.model != null)
-                      .toList();
-                  final customModels = models
-                      .where((m) => m.model == null)
-                      .toList();
-
-                  if (supportedModels.length == 1 && customModels.isEmpty) {
-                    // Single supported model - direct selection
-                    items.add(
-                      CheckedPopupMenuItem<LanguageModelSelection>(
-                        value: LanguageModelSelection(
-                          lang,
-                          supportedModels.first.model,
+                  // Simplified: just show language, no model details
+                  items.add(
+                    CheckedPopupMenuItem<LanguageModelSelection>(
+                      value: LanguageModelSelection(
+                        lang,
+                        null, // No specific model selected, will show all in modal
+                      ),
+                      checked: selectedLang?.code == lang.code,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 6,
+                          horizontal: 4,
                         ),
-                        checked:
-                            selectedLang?.code == lang.code &&
-                            selectedModel == supportedModels.first.model,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(4),
+                          color: selectedLang?.code == lang.code
+                              ? Colors.blue[50]
+                              : Colors.transparent,
+                        ),
                         child: Row(
                           children: [
                             Text(
@@ -555,142 +629,24 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
                               style: const TextStyle(fontSize: 20),
                             ),
                             const SizedBox(width: 8),
-                            Expanded(child: Text(lang.name)),
-                            Text(
-                              ' (${supportedModels.first.model!.displayName})',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[600],
+                            Expanded(
+                              child: Text(
+                                lang.name,
+                                style: TextStyle(
+                                  fontWeight: selectedLang?.code == lang.code
+                                      ? FontWeight.w600
+                                      : FontWeight.normal,
+                                  color: selectedLang?.code == lang.code
+                                      ? Colors.blue[900]
+                                      : Colors.black87,
+                                ),
                               ),
                             ),
                           ],
                         ),
                       ),
-                    );
-                  } else {
-                    // Multiple models or has custom models - show language with model count
-                    final totalCount = models.length;
-
-                    items.add(
-                      CheckedPopupMenuItem<LanguageModelSelection>(
-                        value: LanguageModelSelection(
-                          lang,
-                          supportedModels.isNotEmpty
-                              ? (supportedModels
-                                    .firstWhere(
-                                      (m) => m.isCurrent,
-                                      orElse: () => supportedModels.first,
-                                    )
-                                    .model)
-                              : null,
-                        ),
-                        checked: selectedLang?.code == lang.code,
-                        enabled: supportedModels.isNotEmpty,
-                        child: Row(
-                          children: [
-                            Text(
-                              lang.flag,
-                              style: const TextStyle(fontSize: 20),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(child: Text(lang.name)),
-                            Text(
-                              ' ($totalCount ${totalCount == 1 ? 'model' : 'models'})',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-
-                    // Add sub-items for each supported model (indented)
-                    for (final modelVariant in supportedModels) {
-                      items.add(
-                        CheckedPopupMenuItem<LanguageModelSelection>(
-                          value: LanguageModelSelection(
-                            lang,
-                            modelVariant.model,
-                          ),
-                          checked:
-                              selectedLang?.code == lang.code &&
-                              selectedModel == modelVariant.model,
-                          child: Padding(
-                            padding: const EdgeInsets.only(left: 40.0),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.radio_button_unchecked,
-                                  size: 16,
-                                  color: Colors.grey[600],
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    modelVariant.displayName,
-                                    style: const TextStyle(fontSize: 14),
-                                  ),
-                                ),
-                                Text(
-                                  modelVariant.fileSize,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey[600],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
-                    }
-
-                    // Add sub-items for custom models (disabled, with note)
-                    for (final modelVariant in customModels) {
-                      items.add(
-                        PopupMenuItem<LanguageModelSelection>(
-                          enabled: false,
-                          child: Padding(
-                            padding: const EdgeInsets.only(left: 40.0),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.radio_button_unchecked,
-                                  size: 16,
-                                  color: Colors.grey[400],
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        modelVariant.displayName,
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          color: Colors.grey[600],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Text(
-                                  modelVariant.fileSize,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey[400],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
-                    }
-                  }
+                    ),
+                  );
                 }
 
                 // Add divider between groups (except last)
@@ -793,12 +749,14 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
                   ),
                 const SizedBox(height: 20),
                 // STT Button
-                if (selectedModel != null && !_isInitializing)
+                if ((selectedModel != null ||
+                        selectedCustomModelName != null) &&
+                    !_isInitializing)
                   Builder(
                     builder: (context) {
                       print('[main.dart] build: Creating SherpaOnnxSTTButton');
                       print(
-                        '[main.dart] build: selectedModel=${selectedModel!.displayName} (${selectedModel!.modelName})',
+                        '[main.dart] build: selectedModel=${selectedModel?.displayName ?? "null"} (${selectedModel?.modelName ?? selectedCustomModelName ?? "none"})',
                       );
                       print(
                         '[main.dart] build: selectedLang=${selectedLang?.name} (${selectedLang?.code})',
@@ -806,10 +764,14 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
                       print(
                         '[main.dart] build: languageCode=${selectedLang?.code ?? 'en'}',
                       );
+                      print(
+                        '[main.dart] build: selectedCustomModelName=$selectedCustomModelName',
+                      );
                       return Center(
                         child: SherpaOnnxSTTButton(
                           languageCode: selectedLang?.code ?? 'en',
-                          sherpaModel: selectedModel!,
+                          sherpaModel: selectedModel,
+                          customModelName: selectedCustomModelName,
                           onSpeechTranscribed: _handleSpeechTranscribed,
                           label: 'Press to speak',
                         ),

@@ -65,7 +65,8 @@ class SherpaOnnxSTTButton extends StatefulWidget {
   final bool expanded;
   final Function(String transcribedText, int percentage)? onSpeechTranscribed;
   final Function(bool state)? onStateChanged;
-  final SherpaModelType sherpaModel;
+  final SherpaModelType? sherpaModel; // Null for custom models
+  final String? customModelName; // Used when sherpaModel is null
 
   const SherpaOnnxSTTButton({
     Key? key,
@@ -78,7 +79,8 @@ class SherpaOnnxSTTButton extends StatefulWidget {
     this.expanded = false,
     this.onSpeechTranscribed,
     this.onStateChanged,
-    this.sherpaModel = SherpaModelType.zipformerTh,
+    this.sherpaModel,
+    this.customModelName,
   }) : super(key: key);
 
   @override
@@ -108,9 +110,10 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
     super.initState();
     print('[sherpa-onnx-btn] initState: Initializing button');
     print(
-      '[sherpa-onnx-btn] initState: sherpaModel=${widget.sherpaModel.displayName} (${widget.sherpaModel.modelName})',
+      '[sherpa-onnx-btn] initState: sherpaModel=${widget.sherpaModel?.displayName ?? "null"} (${widget.sherpaModel?.modelName ?? widget.customModelName ?? "none"})',
     );
     print('[sherpa-onnx-btn] initState: languageCode=${widget.languageCode}');
+    print('[sherpa-onnx-btn] initState: customModelName=${widget.customModelName}');
     _buttonController = AnimationController(
       duration: const Duration(milliseconds: 100),
       vsync: this,
@@ -126,7 +129,7 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
     super.didUpdateWidget(oldWidget);
     print('[sherpa-onnx-btn] didUpdateWidget: Widget updated');
     print(
-      '[sherpa-onnx-btn] didUpdateWidget: Old model=${oldWidget.sherpaModel.displayName}, New model=${widget.sherpaModel.displayName}',
+      '[sherpa-onnx-btn] didUpdateWidget: Old model=${oldWidget.sherpaModel?.displayName ?? oldWidget.customModelName ?? "null"}, New model=${widget.sherpaModel?.displayName ?? widget.customModelName ?? "null"}',
     );
     print(
       '[sherpa-onnx-btn] didUpdateWidget: Old languageCode=${oldWidget.languageCode}, New languageCode=${widget.languageCode}',
@@ -134,6 +137,7 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
 
     // Re-initialize if model or language changed
     if (oldWidget.sherpaModel != widget.sherpaModel ||
+        oldWidget.customModelName != widget.customModelName ||
         oldWidget.languageCode != widget.languageCode) {
       print(
         '[sherpa-onnx-btn] didUpdateWidget: Model or language changed, re-initializing...',
@@ -163,10 +167,13 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
       '[sherpa-onnx-btn] _initializeSherpa: _isInitializing=$_isInitializing',
     );
     print(
-      '[sherpa-onnx-btn] _initializeSherpa: widget.sherpaModel=${widget.sherpaModel.displayName} (${widget.sherpaModel.modelName})',
+      '[sherpa-onnx-btn] _initializeSherpa: widget.sherpaModel=${widget.sherpaModel?.displayName ?? "null"} (${widget.sherpaModel?.modelName ?? widget.customModelName ?? "none"})',
     );
     print(
       '[sherpa-onnx-btn] _initializeSherpa: widget.languageCode=${widget.languageCode}',
+    );
+    print(
+      '[sherpa-onnx-btn] _initializeSherpa: widget.customModelName=${widget.customModelName}',
     );
 
     if (_isInitializing) {
@@ -188,9 +195,17 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
       print(
         '[sherpa-onnx-btn] _initializeSherpa: Calling SherpaOnnxSTTHelper.initializeRecognizer...',
       );
-      _recognizer = await SherpaOnnxSTTHelper.initializeRecognizer(
-        widget.sherpaModel,
-      );
+      if (widget.sherpaModel != null) {
+        _recognizer = await SherpaOnnxSTTHelper.initializeRecognizer(
+          widget.sherpaModel!,
+        );
+      } else if (widget.customModelName != null) {
+        _recognizer = await SherpaOnnxSTTHelper.initializeRecognizerByName(
+          widget.customModelName!,
+        );
+      } else {
+        throw Exception('No model provided (neither sherpaModel nor customModelName)');
+      }
       print(
         '[sherpa-onnx-btn] _initializeSherpa: Recognizer initialized successfully',
       );
@@ -225,6 +240,40 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
       } else {
         _stopRecording();
       }
+    }
+  }
+
+  /// Ensure recognizer is initialized before proceeding
+  Future<bool> _ensureRecognizerInitialized() async {
+    if (_recognizer != null) {
+      return true;
+    }
+
+    if (_isInitializing) {
+      print('[sherpa-onnx-btn] _ensureRecognizerInitialized: Recognizer is initializing, waiting...');
+      // Wait for initialization to complete (with timeout)
+      int attempts = 0;
+      const maxAttempts = 100; // 10 seconds max wait
+      while (_isInitializing && attempts < maxAttempts) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        attempts++;
+        if (_recognizer != null) {
+          print('[sherpa-onnx-btn] _ensureRecognizerInitialized: Recognizer initialized after waiting');
+          return true;
+        }
+      }
+      print('[sherpa-onnx-btn] _ensureRecognizerInitialized: Timeout waiting for initialization');
+      return false;
+    }
+
+    // Not initializing and recognizer is null, try to initialize
+    print('[sherpa-onnx-btn] _ensureRecognizerInitialized: Recognizer is null, attempting initialization...');
+    try {
+      await _initializeSherpa();
+      return _recognizer != null;
+    } catch (e) {
+      print('[sherpa-onnx-btn] _ensureRecognizerInitialized: ERROR - Failed to initialize: $e');
+      return false;
     }
   }
 
@@ -275,6 +324,16 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
   // RECORDING LOGIC
   //-----------------------------------------------------
   Future<void> _startRecording() async {
+    // Ensure recognizer is initialized before starting recording
+    final isReady = await _ensureRecognizerInitialized();
+    if (!isReady) {
+      print('[sherpa-onnx-btn] _startRecording: ERROR - Recognizer not initialized, cannot start recording');
+      setState(() {
+        doingAction = false;
+      });
+      widget.onStateChanged?.call(false);
+      return;
+    }
     if (_isRecording || _isInitializing) return;
 
     try {
@@ -342,6 +401,17 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
 
       // Play system beep when recording ends
       SystemSound.play(SystemSoundType.click);
+
+      // Ensure recognizer is initialized before transcribing
+      final isReady = await _ensureRecognizerInitialized();
+      if (!isReady) {
+        print('[sherpa-onnx-btn] _stopRecording: ERROR - Recognizer not initialized, cannot transcribe');
+        setState(() {
+          doingAction = false;
+        });
+        widget.onStateChanged?.call(false);
+        return;
+      }
 
       // Automatically transcribe after stopping
       await _transcribeAudio();
