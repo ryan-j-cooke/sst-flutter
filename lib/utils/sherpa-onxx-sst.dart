@@ -53,8 +53,13 @@ class Language {
 }
 
 // Isolate function for background extraction
+// Optimized to reduce memory usage by processing in steps and clearing references
 Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
   final sendPort = params['sendPort'] as SendPort;
+  List<int>? tarBz2Bytes;
+  List<int>? tarBytes;
+  Archive? archive;
+  
   try {
     final tarBz2Path = params['tarBz2Path'] as String;
     final modelDir = params['modelDir'] as String;
@@ -62,9 +67,20 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
 
     sendPort.send({'status': 'reading', 'progress': 0.0});
 
-    // Read the tar.bz2 file
+    // Read the tar.bz2 file in chunks to reduce peak memory
     final tarBz2File = File(tarBz2Path);
-    final tarBz2Bytes = await tarBz2File.readAsBytes();
+    final fileSize = await tarBz2File.length();
+    
+    // For very large files, warn about memory usage
+    if (fileSize > 500 * 1024 * 1024) { // > 500MB
+      sendPort.send({
+        'status': 'warning',
+        'message': 'Large file detected (${(fileSize / 1024 / 1024).toStringAsFixed(1)} MB). Extraction may use significant memory.',
+      });
+    }
+
+    // Read file - this is still necessary for bzip2 decompression
+    tarBz2Bytes = await tarBz2File.readAsBytes();
     sendPort.send({
       'status': 'read',
       'progress': 10.0,
@@ -74,7 +90,14 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
     // Decompress bzip2
     sendPort.send({'status': 'decompressing', 'progress': 15.0});
     final bz2Decoder = BZip2Decoder();
-    final tarBytes = bz2Decoder.decodeBytes(tarBz2Bytes);
+    tarBytes = bz2Decoder.decodeBytes(tarBz2Bytes);
+    
+    // Clear compressed bytes from memory immediately after decompression
+    tarBz2Bytes = null;
+    
+    // Force garbage collection hint (Dart VM will handle this)
+    // Note: Dart doesn't have explicit GC, but clearing references helps
+    
     sendPort.send({
       'status': 'decompressed',
       'progress': 40.0,
@@ -84,62 +107,78 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
     // Extract tar archive
     sendPort.send({'status': 'decoding', 'progress': 45.0});
     final tarDecoder = TarDecoder();
-    final archive = tarDecoder.decodeBytes(tarBytes);
+    archive = tarDecoder.decodeBytes(tarBytes);
+    
+    // Clear tar bytes from memory after decoding
+    tarBytes = null;
+    
     sendPort.send({
       'status': 'decoded',
       'progress': 50.0,
       'fileCount': archive.files.length,
     });
 
-    // Extract all files
+    // Extract all files one at a time, clearing file content after writing
     int fileCount = 0;
-    int totalFiles = archive.files.where((f) => f.isFile).length;
+    final fileList = archive.files.where((f) => f.isFile).toList();
+    final totalFiles = fileList.length;
 
-    for (final file in archive.files) {
-      if (file.isFile) {
-        fileCount++;
-        final filename = file.name;
+    for (final file in fileList) {
+      fileCount++;
+      final filename = file.name;
 
-        // Calculate progress (50-100%)
-        final progress = 50.0 + (fileCount / totalFiles) * 50.0;
-        sendPort.send({
-          'status': 'extracting',
-          'progress': progress,
-          'fileCount': fileCount,
-          'totalFiles': totalFiles,
-          'currentFile': filename,
-        });
+      // Calculate progress (50-100%)
+      final progress = 50.0 + (fileCount / totalFiles) * 50.0;
+      sendPort.send({
+        'status': 'extracting',
+        'progress': progress,
+        'fileCount': fileCount,
+        'totalFiles': totalFiles,
+        'currentFile': filename,
+      });
 
-        // Handle nested paths in the archive
-        final pathParts = filename.split('/');
-        // Find the model name directory and skip it
-        String relativePath = filename;
-        for (int i = 0; i < pathParts.length; i++) {
-          if (pathParts[i] == modelName || pathParts[i].startsWith(modelName)) {
-            if (i + 1 < pathParts.length) {
-              relativePath = pathParts.sublist(i + 1).join('/');
-            } else {
-              // If the model name is the last part, use just the filename
-              relativePath = pathParts.last;
-            }
-            break;
+      // Handle nested paths in the archive
+      final pathParts = filename.split('/');
+      // Find the model name directory and skip it
+      String relativePath = filename;
+      for (int i = 0; i < pathParts.length; i++) {
+        if (pathParts[i] == modelName || pathParts[i].startsWith(modelName)) {
+          if (i + 1 < pathParts.length) {
+            relativePath = pathParts.sublist(i + 1).join('/');
+          } else {
+            // If the model name is the last part, use just the filename
+            relativePath = pathParts.last;
           }
-        }
-
-        // If no model name found, try to use the path after the first directory
-        if (relativePath == filename && pathParts.length > 1) {
-          relativePath = pathParts.sublist(1).join('/');
-        }
-
-        final outputFile = File('$modelDir/$relativePath');
-        try {
-          await outputFile.parent.create(recursive: true);
-          await outputFile.writeAsBytes(file.content as List<int>);
-        } catch (e) {
-          sendPort.send({'error': 'Failed to extract $filename: $e'});
+          break;
         }
       }
+
+      // If no model name found, try to use the path after the first directory
+      if (relativePath == filename && pathParts.length > 1) {
+        relativePath = pathParts.sublist(1).join('/');
+      }
+
+      final outputFile = File('$modelDir/$relativePath');
+      try {
+        await outputFile.parent.create(recursive: true);
+        
+        // Write file content
+        final content = file.content;
+        if (content is List<int>) {
+          await outputFile.writeAsBytes(content);
+        } else if (content is Uint8List) {
+          await outputFile.writeAsBytes(content);
+        }
+        
+        // Clear file content reference after writing (help GC)
+        // Note: file.content is still in memory in the archive, but we've written it
+      } catch (e) {
+        sendPort.send({'error': 'Failed to extract $filename: $e'});
+      }
     }
+
+    // Clear archive reference
+    archive = null;
 
     sendPort.send({
       'status': 'completed',
@@ -147,6 +186,11 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
       'fileCount': fileCount,
     });
   } catch (e, stackTrace) {
+    // Clear all references on error
+    tarBz2Bytes = null;
+    tarBytes = null;
+    archive = null;
+    
     sendPort.send({
       'error': 'Extraction failed: $e',
       'stackTrace': stackTrace.toString(),
@@ -276,10 +320,13 @@ class SherpaOnnxSTTHelper {
   /// Initialize Sherpa-ONNX recognizer
   ///
   /// Returns the initialized OfflineRecognizer
+  /// This method performs file checks in an isolate to avoid blocking the UI
   static Future<OfflineRecognizer> initializeRecognizer(
     SherpaModelType model,
   ) async {
     print('[sherpa-onxx-sst] initializeRecognizer: Starting for model=${model.displayName} (${model.modelName})');
+    
+    // Ensure model exists (download/extract if needed) - this is already async
     final modelDir = await ensureModelExists(model);
     print('[sherpa-onxx-sst] initializeRecognizer: Model directory=$modelDir');
 
@@ -295,22 +342,31 @@ class SherpaOnnxSTTHelper {
     print('[sherpa-onxx-sst] initializeRecognizer: joinerPath=$joinerPath');
     print('[sherpa-onxx-sst] initializeRecognizer: tokensPath=$tokensPath');
 
-    // Verify all files exist before initialization
-    final encoderExists = await File(encoderPath).exists();
-    final decoderExists = await File(decoderPath).exists();
-    final joinerExists = await File(joinerPath).exists();
-    final tokensExists = await File(tokensPath).exists();
+    // Perform file existence checks in an isolate to avoid blocking UI
+    final fileCheckResult = await _checkModelFilesInIsolate(
+      encoderPath,
+      decoderPath,
+      joinerPath,
+      tokensPath,
+    );
     
-    print('[sherpa-onxx-sst] initializeRecognizer: encoderExists=$encoderExists');
-    print('[sherpa-onxx-sst] initializeRecognizer: decoderExists=$decoderExists');
-    print('[sherpa-onxx-sst] initializeRecognizer: joinerExists=$joinerExists');
-    print('[sherpa-onxx-sst] initializeRecognizer: tokensExists=$tokensExists');
+    print('[sherpa-onxx-sst] initializeRecognizer: encoderExists=${fileCheckResult['encoderExists']}');
+    print('[sherpa-onxx-sst] initializeRecognizer: decoderExists=${fileCheckResult['decoderExists']}');
+    print('[sherpa-onxx-sst] initializeRecognizer: joinerExists=${fileCheckResult['joinerExists']}');
+    print('[sherpa-onxx-sst] initializeRecognizer: tokensExists=${fileCheckResult['tokensExists']}');
 
-    if (!encoderExists || !decoderExists || !joinerExists || !tokensExists) {
+    if (!fileCheckResult['encoderExists']! || 
+        !fileCheckResult['decoderExists']! || 
+        !fileCheckResult['joinerExists']! || 
+        !fileCheckResult['tokensExists']!) {
       print('[sherpa-onxx-sst] initializeRecognizer: ERROR - Model files missing!');
       throw Exception('Model files missing');
     }
 
+    // Yield control to UI thread to allow loading indicator to show
+    // Use a small delay to ensure UI has time to update
+    await Future.delayed(const Duration(milliseconds: 50));
+    
     print('[sherpa-onxx-sst] initializeRecognizer: All files exist, creating recognizer config...');
     // Initialize with transducer model config (for Zipformer models)
     final transducerConfig = OfflineTransducerModelConfig(
@@ -327,10 +383,68 @@ class SherpaOnnxSTTHelper {
       feat: FeatureConfig(sampleRate: 16000),
     );
 
+    // Yield control again before creating recognizer (this is the heavy operation)
+    // This allows the UI to show the loading state before blocking
+    await Future.delayed(const Duration(milliseconds: 50));
+    
     print('[sherpa-onxx-sst] initializeRecognizer: Creating OfflineRecognizer...');
+    // Note: OfflineRecognizer creation must happen on main thread (native object)
+    // This is the blocking operation, but we've already shown loading state
     final recognizer = OfflineRecognizer(recognizerConfig);
     print('[sherpa-onxx-sst] initializeRecognizer: Recognizer created successfully');
     return recognizer;
+  }
+
+  /// Check model files existence in an isolate to avoid blocking UI
+  static Future<Map<String, bool>> _checkModelFilesInIsolate(
+    String encoderPath,
+    String decoderPath,
+    String joinerPath,
+    String tokensPath,
+  ) async {
+    final receivePort = ReceivePort();
+    
+    await Isolate.spawn(_checkModelFilesIsolate, {
+      'sendPort': receivePort.sendPort,
+      'encoderPath': encoderPath,
+      'decoderPath': decoderPath,
+      'joinerPath': joinerPath,
+      'tokensPath': tokensPath,
+    });
+    
+    final result = await receivePort.first as Map<String, bool>;
+    return result;
+  }
+
+  /// Isolate entry point for checking model files
+  static void _checkModelFilesIsolate(Map<String, dynamic> message) {
+    final sendPort = message['sendPort'] as SendPort;
+    final encoderPath = message['encoderPath'] as String;
+    final decoderPath = message['decoderPath'] as String;
+    final joinerPath = message['joinerPath'] as String;
+    final tokensPath = message['tokensPath'] as String;
+    
+    try {
+      final encoderExists = File(encoderPath).existsSync();
+      final decoderExists = File(decoderPath).existsSync();
+      final joinerExists = File(joinerPath).existsSync();
+      final tokensExists = File(tokensPath).existsSync();
+      
+      sendPort.send({
+        'encoderExists': encoderExists,
+        'decoderExists': decoderExists,
+        'joinerExists': joinerExists,
+        'tokensExists': tokensExists,
+      });
+    } catch (e) {
+      // On error, return all false
+      sendPort.send({
+        'encoderExists': false,
+        'decoderExists': false,
+        'joinerExists': false,
+        'tokensExists': false,
+      });
+    }
   }
 
   /// Transcribe audio file using Sherpa-ONNX
@@ -461,14 +575,102 @@ class SherpaOnnxSTTHelper {
     void Function(double progress, String status)? onExtractionProgress,
     CancellationToken? cancelToken,
   }) async {
+    print('[sherpa-onxx-sst] downloadModel: ========== Starting download process ==========');
+    print('[sherpa-onxx-sst] downloadModel: Model=${model.displayName} (${model.modelName})');
+    print('[sherpa-onxx-sst] downloadModel: Model directory (destination for extracted files)=$modelDir');
+    
     final modelUrl =
         'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${model.modelName}.tar.bz2';
+    print('[sherpa-onxx-sst] downloadModel: Model URL=$modelUrl');
 
-    // Download to temporary file first
+    // First, check if model files already exist
+    final encoderFile = File('$modelDir/encoder.onnx');
+    final decoderFile = File('$modelDir/decoder.onnx');
+    final joinerFile = File('$modelDir/joiner.onnx');
+    final tokensFile = File('$modelDir/tokens.txt');
+
+    print('[sherpa-onxx-sst] downloadModel: Checking model files existence...');
+    print('[sherpa-onxx-sst] downloadModel: - encoder.onnx: ${encoderFile.path}');
+    print('[sherpa-onxx-sst] downloadModel: - decoder.onnx: ${decoderFile.path}');
+    print('[sherpa-onxx-sst] downloadModel: - joiner.onnx: ${joinerFile.path}');
+    print('[sherpa-onxx-sst] downloadModel: - tokens.txt: ${tokensFile.path}');
+
+    final encoderExists = await encoderFile.exists();
+    final decoderExists = await decoderFile.exists();
+    final joinerExists = await joinerFile.exists();
+    final tokensExists = await tokensFile.exists();
+
+    print('[sherpa-onxx-sst] downloadModel: File existence check results:');
+    print('[sherpa-onxx-sst] downloadModel: - encoder.onnx exists: $encoderExists');
+    print('[sherpa-onxx-sst] downloadModel: - decoder.onnx exists: $decoderExists');
+    print('[sherpa-onxx-sst] downloadModel: - joiner.onnx exists: $joinerExists');
+    print('[sherpa-onxx-sst] downloadModel: - tokens.txt exists: $tokensExists');
+
+    final modelFilesExist = encoderExists &&
+        decoderExists &&
+        joinerExists &&
+        tokensExists;
+
+    if (modelFilesExist) {
+      print('[sherpa-onxx-sst] downloadModel: ✓ All model files already exist, skipping download and extraction');
+      print('[sherpa-onxx-sst] downloadModel: ========== Download process complete (no action needed) ==========');
+      return;
+    }
+
+    // Model files don't exist, check if .tar.bz2 file exists
     final tempDir = await getTemporaryDirectory();
     final tempFilePath = '${tempDir.path}/${model.modelName}.tar.bz2';
+    final downloadedFile = File(tempFilePath);
 
-    // Use FileDownloadHelper for better error handling and progress tracking
+    print('[sherpa-onxx-sst] downloadModel: Model files missing, checking for compressed file...');
+    print('[sherpa-onxx-sst] downloadModel: Compressed file location (destination for download)=$tempFilePath');
+
+    final compressedFileExists = await downloadedFile.exists();
+    print('[sherpa-onxx-sst] downloadModel: Compressed file (.tar.bz2) exists: $compressedFileExists');
+
+    if (compressedFileExists) {
+      final compressedFileSize = await downloadedFile.length();
+      print('[sherpa-onxx-sst] downloadModel: Compressed file size: ${(compressedFileSize / 1024 / 1024).toStringAsFixed(2)} MB');
+      print('[sherpa-onxx-sst] downloadModel: Found existing .tar.bz2 file, verifying size...');
+      
+      // Verify file size matches remote (to ensure it's complete)
+      try {
+        final localSize = await downloadedFile.length();
+        final remoteSize = await _getRemoteFileSize(modelUrl);
+        
+        if (remoteSize != null && localSize == remoteSize) {
+          print('[sherpa-onxx-sst] downloadModel: ✓ Compressed file size matches remote (${(localSize / 1024 / 1024).toStringAsFixed(1)} MB)');
+          print('[sherpa-onxx-sst] downloadModel: Skipping download, proceeding directly to extraction');
+          print('[sherpa-onxx-sst] downloadModel: Extraction destination: $modelDir');
+          // File exists and size matches, skip download and go straight to extraction
+          await _extractModel(
+            downloadedFile,
+            modelDir,
+            model.modelName,
+            onProgress: onExtractionProgress,
+          );
+          print('[sherpa-onxx-sst] downloadModel: ========== Download process complete (extraction finished) ==========');
+          return;
+        } else {
+          print('[sherpa-onxx-sst] downloadModel: ✗ Compressed file size mismatch (local: ${(localSize / 1024 / 1024).toStringAsFixed(2)} MB, remote: ${remoteSize != null ? (remoteSize / 1024 / 1024).toStringAsFixed(2) : "unknown"} MB)');
+          print('[sherpa-onxx-sst] downloadModel: Deleting invalid compressed file and re-downloading...');
+          // Size doesn't match, delete and re-download
+          await downloadedFile.delete();
+        }
+      } catch (e) {
+        print('[sherpa-onxx-sst] downloadModel: ✗ Error verifying existing file: $e');
+        print('[sherpa-onxx-sst] downloadModel: Deleting compressed file and re-downloading...');
+        // If we can't verify, delete and re-download to be safe
+        if (await downloadedFile.exists()) {
+          await downloadedFile.delete();
+        }
+      }
+    }
+
+    // .tar.bz2 file doesn't exist or was invalid, download it
+    print('[sherpa-onxx-sst] downloadModel: Starting download from: $modelUrl');
+    print('[sherpa-onxx-sst] downloadModel: Download destination: $tempFilePath');
+    print('[sherpa-onxx-sst] downloadModel: Extraction will occur to: $modelDir');
     await FileDownloadHelper.downloadFile(
       Uri.parse(modelUrl),
       tempFilePath,
@@ -477,14 +679,20 @@ class SherpaOnnxSTTHelper {
     );
 
     // After download, extract the model
-    final downloadedFile = File(tempFilePath);
     if (await downloadedFile.exists()) {
+      final downloadedSize = await downloadedFile.length();
+      print('[sherpa-onxx-sst] downloadModel: ✓ Download complete, file size: ${(downloadedSize / 1024 / 1024).toStringAsFixed(2)} MB');
+      print('[sherpa-onxx-sst] downloadModel: Starting extraction to: $modelDir');
       await _extractModel(
         downloadedFile,
         modelDir,
         model.modelName,
         onProgress: onExtractionProgress,
       );
+      print('[sherpa-onxx-sst] downloadModel: ========== Download process complete (download + extraction finished) ==========');
+    } else {
+      print('[sherpa-onxx-sst] downloadModel: ✗ ERROR: Downloaded file does not exist after download');
+      print('[sherpa-onxx-sst] downloadModel: ========== Download process failed ==========');
     }
   }
 

@@ -180,6 +180,9 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
       _isInitializing = true;
     });
 
+    // Yield control to UI thread to ensure loading indicator is shown
+    await Future.delayed(const Duration(milliseconds: 50));
+
     try {
       // Initialize recognizer using helper
       print(

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 
 import '../cards/index.dart';
 import '../../../utils/sherpa-onxx-sst.dart';
@@ -8,6 +9,7 @@ import './download-list-item.dart';
 import './step-1.dart';
 import './step-2.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
 // Export CancellationToken for use in this file
 export '../../../utils/file.dart' show CancellationToken;
@@ -52,28 +54,124 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
       _isInitializing = true;
     });
 
-    // Initialize model infos
+    // Run model existence checks in an isolate to avoid blocking UI
+    final results = await _checkModelsExistInIsolate(widget.requiredModels);
+
+    // Extract results from isolate response
+    final modelFilesExist =
+        results['modelFilesExist'] as Map<String, bool>? ?? {};
+    final tarBz2Exists = results['tarBz2Exists'] as Map<String, bool>? ?? {};
+
+    // Update model infos with results from isolate
     for (final model in widget.requiredModels) {
       final displayName = model.displayName;
       final fileSize = model.fileSize;
-      final exists = await SherpaOnnxSTTHelper.modelExists(model);
+      final modelFilesExistForModel = modelFilesExist[model.modelName] ?? false;
+      final tarBz2ExistsForModel = tarBz2Exists[model.modelName] ?? false;
 
+      // If model files exist, it's downloaded
+      // If .tar.bz2 exists but model files don't, it needs extraction (show as notDownloaded, but downloadModel will handle it)
       _modelInfos[model] = ModelInfo(
         model: model,
         displayName: displayName,
         fileSize: fileSize,
-        status: exists
+        status: modelFilesExistForModel
             ? ModelDownloadStatus.downloaded
             : ModelDownloadStatus.notDownloaded,
+        hasCompressedFile: tarBz2ExistsForModel && !modelFilesExistForModel,
       );
+
+      // Log status for debugging
+      if (tarBz2ExistsForModel && !modelFilesExistForModel) {
+        print(
+          '[download-card] _initializeModels: Model ${model.displayName} has .tar.bz2 file but model files missing - will extract on download',
+        );
+      }
     }
 
-    setState(() {
-      _isInitializing = false;
+    if (mounted) {
+      setState(() {
+        _isInitializing = false;
+      });
+
+      // Check if all models are already downloaded
+      _checkAllDownloaded();
+    }
+  }
+
+  /// Check model existence in an isolate to avoid blocking UI
+  Future<Map<String, dynamic>> _checkModelsExistInIsolate(
+    List<SherpaModelType> models,
+  ) async {
+    // Create receive port for isolate communication
+    final receivePort = ReceivePort();
+
+    // Spawn isolate to check model existence
+    await Isolate.spawn(_checkModelsExistIsolate, {
+      'sendPort': receivePort.sendPort,
+      'modelNames': models.map((m) => m.modelName).toList(),
     });
 
-    // Check if all models are already downloaded
-    _checkAllDownloaded();
+    // Wait for result from isolate
+    final result = await receivePort.first as Map<String, dynamic>;
+    return result;
+  }
+
+  /// Isolate entry point for checking model existence
+  static Future<void> _checkModelsExistIsolate(
+    Map<String, dynamic> params,
+  ) async {
+    final sendPort = params['sendPort'] as SendPort;
+    final modelNames = params['modelNames'] as List<String>;
+
+    try {
+      final results = <String, bool>{};
+      final tarBz2Exists = <String, bool>{};
+
+      // Get directories
+      final documentsDir = await getApplicationDocumentsDirectory();
+      final baseModelDir = '${documentsDir.path}/sherpa_onnx_models';
+      final tempDir = await getTemporaryDirectory();
+
+      // Check each model
+      for (final modelName in modelNames) {
+        final modelDir = '$baseModelDir/$modelName';
+
+        // Check if required model files exist
+        final encoderFile = File('$modelDir/encoder.onnx');
+        final decoderFile = File('$modelDir/decoder.onnx');
+        final joinerFile = File('$modelDir/joiner.onnx');
+        final tokensFile = File('$modelDir/tokens.txt');
+
+        final encoderExists = await encoderFile.exists();
+        final decoderExists = await decoderFile.exists();
+        final joinerExists = await joinerFile.exists();
+        final tokensExists = await tokensFile.exists();
+
+        final modelFilesExist =
+            encoderExists && decoderExists && joinerExists && tokensExists;
+        results[modelName] = modelFilesExist;
+
+        // Also check if .tar.bz2 file exists (for cases where download completed but extraction didn't)
+        if (!modelFilesExist) {
+          final tarBz2File = File('${tempDir.path}/$modelName.tar.bz2');
+          tarBz2Exists[modelName] = await tarBz2File.exists();
+        } else {
+          tarBz2Exists[modelName] = false;
+        }
+      }
+
+      sendPort.send({'modelFilesExist': results, 'tarBz2Exists': tarBz2Exists});
+    } catch (e) {
+      // On error, return all false
+      final results = <String, bool>{};
+      final tarBz2Exists = <String, bool>{};
+      for (final modelName in modelNames) {
+        results[modelName] = false;
+        tarBz2Exists[modelName] = false;
+      }
+      sendPort.send({'modelFilesExist': results, 'tarBz2Exists': tarBz2Exists});
+    }
   }
 
   bool _areAllModelsDownloaded() {
@@ -126,8 +224,22 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
   Future<void> _downloadModel(ModelInfo modelInfo) async {
     if (modelInfo.status == ModelDownloadStatus.downloading ||
         modelInfo.status == ModelDownloadStatus.downloaded) {
+      print(
+        '[download-card] _downloadModel: Model ${modelInfo.displayName} is already downloading or downloaded, skipping',
+      );
       return;
     }
+
+    print(
+      '[download-card] _downloadModel: ========== Starting download for model ==========',
+    );
+    print(
+      '[download-card] _downloadModel: Model=${modelInfo.displayName} (${modelInfo.model.modelName})',
+    );
+    print('[download-card] _downloadModel: File size=${modelInfo.fileSize}');
+    print(
+      '[download-card] _downloadModel: Has compressed file=${modelInfo.hasCompressedFile}',
+    );
 
     // Create cancellation token for this download
     final cancelToken = CancellationToken();
@@ -138,11 +250,18 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
       modelInfo.downloadedBytes = 0;
       modelInfo.totalBytes = null;
       modelInfo.errorMessage = null;
+      modelInfo.statusMessage = null; // Clear previous status message
     });
 
     try {
       final modelDir = await SherpaOnnxSTTHelper.getModelPath(modelInfo.model);
+      print(
+        '[download-card] _downloadModel: Model directory destination=$modelDir',
+      );
       await Directory(modelDir).create(recursive: true);
+      print('[download-card] _downloadModel: Model directory created/verified');
+
+      bool downloadComplete = false;
 
       await SherpaOnnxSTTHelper.downloadModel(
         modelInfo.model,
@@ -152,6 +271,25 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
             setState(() {
               modelInfo.downloadedBytes = downloaded;
               modelInfo.totalBytes = total;
+
+              // When download reaches 100%, reset progress to show extraction phase
+              // This stops the download indicator from showing 100% while extraction continues
+              if (total != null && downloaded >= total && !downloadComplete) {
+                downloadComplete = true;
+                // Reset progress indicators - extraction will be shown separately
+                modelInfo.downloadedBytes = 0;
+                modelInfo.totalBytes = null;
+              }
+            });
+          }
+        },
+        onExtractionProgress: (progress, status) {
+          // Update UI during extraction phase with status message
+          // Keep status as downloading during extraction
+          if (mounted && !cancelToken.isCancelled) {
+            setState(() {
+              // Update status message to show extraction progress
+              modelInfo.statusMessage = status;
             });
           }
         },
@@ -161,6 +299,12 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
       if (mounted && !cancelToken.isCancelled) {
         setState(() {
           modelInfo.status = ModelDownloadStatus.downloaded;
+          // Reset progress indicators since download+extraction is complete
+          modelInfo.downloadedBytes = 0;
+          modelInfo.totalBytes = null;
+          modelInfo.statusMessage = null; // Clear status message when complete
+          modelInfo.hasCompressedFile =
+              false; // Model files now exist, no longer need extraction
         });
         _checkAllDownloaded();
       }
@@ -172,11 +316,13 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
             modelInfo.downloadedBytes = 0;
             modelInfo.totalBytes = null;
             modelInfo.errorMessage = null;
+            modelInfo.statusMessage = null; // Clear status message on cancel
           });
         } else {
           setState(() {
             modelInfo.status = ModelDownloadStatus.error;
             modelInfo.errorMessage = e.toString();
+            modelInfo.statusMessage = null; // Clear status message on error
           });
         }
       }
@@ -195,6 +341,7 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
         modelInfo.downloadedBytes = 0;
         modelInfo.totalBytes = null;
         modelInfo.errorMessage = null;
+        modelInfo.statusMessage = null; // Clear status message on cancel
       });
       _cancelTokens.remove(modelInfo.model);
     }
@@ -229,6 +376,7 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
         modelInfo.downloadedBytes = 0;
         modelInfo.totalBytes = null;
         modelInfo.errorMessage = null;
+        modelInfo.statusMessage = null; // Clear previous status message
       });
     }
 
@@ -255,12 +403,25 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
               });
             }
           },
+          onExtractionProgress: (progress, status) {
+            // Update UI during extraction phase with status message
+            if (mounted && !cancelToken.isCancelled) {
+              setState(() {
+                // Update status message to show extraction progress
+                modelInfo.statusMessage = status;
+              });
+            }
+          },
           cancelToken: cancelToken,
         );
 
         if (mounted && !cancelToken.isCancelled) {
           setState(() {
             modelInfo.status = ModelDownloadStatus.downloaded;
+            modelInfo.statusMessage =
+                null; // Clear status message when complete
+            modelInfo.hasCompressedFile =
+                false; // Model files now exist, no longer need extraction
           });
         }
       } catch (e) {
@@ -271,6 +432,7 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
               modelInfo.downloadedBytes = 0;
               modelInfo.totalBytes = null;
               modelInfo.errorMessage = null;
+              modelInfo.statusMessage = null; // Clear status message on cancel
             });
           } else {
             setState(() {
@@ -461,6 +623,9 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
           modelInfo.downloadedBytes = 0;
           modelInfo.totalBytes = null;
           modelInfo.errorMessage = null;
+          modelInfo.statusMessage = null; // Clear status message on delete
+          modelInfo.hasCompressedFile =
+              false; // Clear compressed file flag on delete
         });
         // Re-check if all models are downloaded after deletion
         _checkAllDownloaded();

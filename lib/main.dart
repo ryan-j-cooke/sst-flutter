@@ -419,14 +419,23 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
     final lang = selection.language;
     final model = selection.model;
 
-    setState(() {
-      selectedLang = lang;
-      _transcription = 'Press the button to start recording';
-      _statusMessage = 'Loading model for ${lang.name}...';
-    });
+    // Close the menu first by scheduling the processing after the current frame
+    // This ensures the menu closes before we start the potentially long-running operation
+    await Future.microtask(() async {
+      // Small delay to ensure menu closes visually
+      await Future.delayed(const Duration(milliseconds: 100));
 
-    // Load model for new language (or specific model if selected)
-    await _loadModelForLanguage(lang.code, model);
+      if (!mounted) return;
+
+      setState(() {
+        selectedLang = lang;
+        _transcription = 'Press the button to start recording';
+        _statusMessage = 'Loading model for ${lang.name}...';
+      });
+
+      // Load model for new language (or specific model if selected)
+      await _loadModelForLanguage(lang.code, model);
+    });
   }
 
   void _handleSpeechTranscribed(String transcribedText, int percentage) {
@@ -441,11 +450,53 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
     super.dispose();
   }
 
+  /// Get the model variant for the selected model to access accuracy/proficiency
+  SherpaModelVariant? _getSelectedModelVariant() {
+    if (selectedLang == null || selectedModel == null) return null;
+
+    final normalizedCode = selectedLang!.code.contains('-')
+        ? selectedLang!.code.split('-').first
+        : selectedLang!.code;
+
+    final models = SherpaModelDictionary.getModelsForLanguage(normalizedCode);
+    return models.firstWhere(
+      (m) => m.model == selectedModel,
+      orElse: () => models.first,
+    );
+  }
+
+  /// Get proficiency/accuracy display text
+  String _getProficiencyText(ModelAccuracy accuracy) {
+    switch (accuracy) {
+      case ModelAccuracy.lowest:
+        return 'Basic';
+      case ModelAccuracy.low:
+        return 'Standard';
+      case ModelAccuracy.moderate:
+        return 'Good';
+      case ModelAccuracy.high:
+        return 'High';
+      case ModelAccuracy.highest:
+        return 'Premium';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Build title with language name and proficiency
+    String titleText = 'Sherpa-ONNX STT';
+    if (selectedLang != null) {
+      titleText = selectedLang!.name;
+      final modelVariant = _getSelectedModelVariant();
+      if (modelVariant != null) {
+        final proficiency = _getProficiencyText(modelVariant.accuracy);
+        titleText += ' ($proficiency)';
+      }
+    }
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Sherpa-ONNX STT - Multilingual'),
+        title: Text(titleText),
         actions: [
           // Language selector with grouped list and model sub-items
           PopupMenuButton<LanguageModelSelection>(

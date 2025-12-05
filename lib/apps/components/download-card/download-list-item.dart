@@ -13,6 +13,8 @@ class ModelInfo {
   int downloadedBytes;
   int? totalBytes;
   String? errorMessage;
+  String? statusMessage; // Current status message (e.g., "Extracting...", "Decompressing...")
+  bool hasCompressedFile; // Whether the .tar.bz2 file exists but model files don't
 
   ModelInfo({
     required this.model,
@@ -22,6 +24,8 @@ class ModelInfo {
     this.downloadedBytes = 0,
     this.totalBytes,
     this.errorMessage,
+    this.statusMessage,
+    this.hasCompressedFile = false,
   });
 }
 
@@ -128,6 +132,21 @@ class DownloadListItem extends StatelessWidget {
                         fileSizeText,
                         style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                       ),
+                      // Status message (for extraction progress, etc.)
+                      if (modelInfo.statusMessage != null &&
+                          modelInfo.statusMessage!.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          modelInfo.statusMessage!,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isDownloading
+                                ? Colors.blue[700]
+                                : Colors.grey[600],
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -176,7 +195,12 @@ class DownloadListItem extends StatelessWidget {
                   )
                 else
                   IconButton(
-                    icon: const Icon(Icons.download, size: 24),
+                    icon: Icon(
+                      modelInfo.hasCompressedFile
+                          ? Icons.folder_zip
+                          : Icons.download,
+                      size: 24,
+                    ),
                     onPressed: onDownload,
                     color: Colors.blue[700],
                     padding: EdgeInsets.zero,
@@ -184,6 +208,9 @@ class DownloadListItem extends StatelessWidget {
                       minWidth: 32,
                       minHeight: 32,
                     ),
+                    tooltip: modelInfo.hasCompressedFile
+                        ? 'Extract model'
+                        : 'Download model',
                   ),
               ],
             ),
