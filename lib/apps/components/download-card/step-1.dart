@@ -93,10 +93,7 @@ class Step1Content extends StatelessWidget {
                       ? onDownloadAll
                       : null,
                   icon: const Icon(Icons.cloud_download, size: 20),
-                  label: const Text(
-                    'Download All',
-                    style: TextStyle(fontSize: 16),
-                  ),
+                  label: const Text('All', style: TextStyle(fontSize: 16)),
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 24,

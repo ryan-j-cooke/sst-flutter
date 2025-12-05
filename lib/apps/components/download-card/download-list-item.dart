@@ -86,11 +86,14 @@ class DownloadListItem extends StatelessWidget {
                     children: [
                       Row(
                         children: [
-                          Text(
-                            modelInfo.displayName,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
+                          Flexible(
+                            child: Text(
+                              modelInfo.displayName,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           if (isRequired) ...[
