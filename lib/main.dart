@@ -654,11 +654,20 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
   void _handleSpeechTranscribed(String transcribedText, int percentage) {
     setState(() {
       _transcription = transcribedText;
-      _statusMessage = 'Transcription complete (${percentage}% match)';
+      // Only show "complete" status for final results (percentage > 0)
+      // Partial results (percentage == 0) are just updates
+      if (percentage > 0) {
+        _statusMessage = 'Transcription complete (${percentage}% match)';
+      } else {
+        _statusMessage = 'Transcribing...';
+      }
     });
 
-    // Automatically speak the transcribed text
-    _speakText(transcribedText);
+    // Only automatically speak the transcribed text for final results
+    // Partial results (percentage == 0) are just UI updates, don't trigger TTS
+    if (percentage > 0) {
+      _speakText(transcribedText);
+    }
   }
 
   @override

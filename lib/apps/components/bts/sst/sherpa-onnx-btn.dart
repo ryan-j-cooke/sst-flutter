@@ -64,7 +64,12 @@ class SherpaOnnxSTTButton extends StatefulWidget {
   final VoidCallback? onReleased;
   final String? label;
   final bool expanded;
-  final Function(String transcribedText, int percentage)? onSpeechTranscribed;
+  final Function(String transcribedText, int percentage)?
+  onSpeechTranscribed; // Deprecated: Use onResult and onTranscriptionCompleted
+  final Function(String partialText)?
+  onResult; // Called for partial results during transcription
+  final Function(String transcribedText, int percentage)?
+  onTranscriptionCompleted; // Called when transcription is complete
   final Function(bool state)? onStateChanged;
   final SherpaModelType? sherpaModel;
   final String? customModelName;
@@ -79,6 +84,8 @@ class SherpaOnnxSTTButton extends StatefulWidget {
     this.label,
     this.expanded = false,
     this.onSpeechTranscribed,
+    this.onResult,
+    this.onTranscriptionCompleted,
     this.onStateChanged,
     this.sherpaModel,
     this.customModelName,
@@ -501,12 +508,14 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
       final transcribedText = await _transcribeAudioWithYields(
         audioPath: _currentRecordingPath!,
         onPartialResult: (partialText) {
-          // Call callback with partial result in real-time (percentage will be 0 for partial)
+          // Call callback with partial result in real-time
           print(
             '[sherpa-onnx-btn] _transcribeAudio: Partial result received: "$partialText"',
           );
           if (mounted) {
-            // Call callback with partial result (percentage will be 0 for partial)
+            // Call onResult callback for partial results
+            widget.onResult?.call(partialText);
+            // Also call deprecated onSpeechTranscribed for backward compatibility
             widget.onSpeechTranscribed?.call(partialText, 0);
           }
         },
@@ -534,8 +543,11 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
       // Call the callback with final transcribed text and percentage
       if (transcribedText.isNotEmpty) {
         print(
-          '[sherpa-onnx-btn] _transcribeAudio: Calling onSpeechTranscribed callback with final result',
+          '[sherpa-onnx-btn] _transcribeAudio: Calling onTranscriptionCompleted callback with final result',
         );
+        // Call onTranscriptionCompleted callback for final results
+        widget.onTranscriptionCompleted?.call(transcribedText, percentage);
+        // Also call deprecated onSpeechTranscribed for backward compatibility
         widget.onSpeechTranscribed?.call(transcribedText, percentage);
       } else {
         print(
