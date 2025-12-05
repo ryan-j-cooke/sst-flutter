@@ -15,7 +15,8 @@
     <application
         android:label="stttest"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:largeHeap="true">
 
         <activity
             android:name=".MainActivity"

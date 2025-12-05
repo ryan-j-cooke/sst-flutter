@@ -9,6 +9,89 @@ import 'package:sherpa_onnx/sherpa_onnx.dart';
 import 'package:stttest/utils/file.dart'
     show FileDownloadHelper, CancellationToken;
 
+// Platform-specific extraction using system tools (more memory-efficient)
+Future<bool> _trySystemExtraction(
+  String tarBz2Path,
+  String modelDir,
+  String modelName,
+  SendPort sendPort,
+) async {
+  try {
+    print(
+      '[sherpa-onxx-sst] _trySystemExtraction: Attempting system tool extraction (memory-efficient)',
+    );
+
+    // Check if tar and bzip2 are available
+    final tarResult = await Process.run('which', ['tar']);
+    if (tarResult.exitCode != 0) {
+      print(
+        '[sherpa-onxx-sst] _trySystemExtraction: tar command not found, falling back to Dart implementation',
+      );
+      return false;
+    }
+
+    sendPort.send({'status': 'reading', 'progress': 0.0});
+    print('[sherpa-onxx-sst] _trySystemExtraction: [0%] Using system tar/bzip2...');
+
+    // Create model directory
+    await Directory(modelDir).create(recursive: true);
+
+    // Use tar with bzip2 decompression: tar -xjf archive.tar.bz2 -C destination
+    // -x: extract
+    // -j: filter through bzip2
+    // -f: file
+    // -C: change to directory
+    sendPort.send({'status': 'decompressing', 'progress': 10.0});
+    print('[sherpa-onxx-sst] _trySystemExtraction: [10%] Decompressing with bzip2...');
+
+    final tarProcess = await Process.start(
+      'tar',
+      ['-xjf', tarBz2Path, '-C', modelDir, '--strip-components=1'],
+      runInShell: false,
+    );
+
+    // Monitor process output
+    final stderr = StringBuffer();
+    tarProcess.stderr.transform(const SystemEncoding().decoder).listen((data) {
+      stderr.write(data);
+    });
+
+    // Wait for process to complete
+    final exitCode = await tarProcess.exitCode;
+
+    if (exitCode != 0) {
+      print(
+        '[sherpa-onxx-sst] _trySystemExtraction: tar failed with exit code $exitCode: ${stderr.toString()}',
+      );
+      return false;
+    }
+
+    // Count extracted files
+    int fileCount = 0;
+    await for (final entity in Directory(modelDir).list(recursive: true)) {
+      if (entity is File) {
+        fileCount++;
+      }
+    }
+
+    print(
+      '[sherpa-onxx-sst] _trySystemExtraction: [100%] ✓ Extraction complete! Extracted $fileCount files',
+    );
+    sendPort.send({
+      'status': 'completed',
+      'progress': 100.0,
+      'fileCount': fileCount,
+    });
+
+    return true;
+  } catch (e) {
+    print(
+      '[sherpa-onxx-sst] _trySystemExtraction: System extraction failed: $e, falling back to Dart implementation',
+    );
+    return false;
+  }
+}
+
 // Sherpa-ONNX model types
 enum SherpaModelType {
   zipformerEn('Zipformer EN', 'sherpa-onnx-zipformer-en-2023-06-26', '~293 MB'),
@@ -65,15 +148,51 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
     final modelDir = params['modelDir'] as String;
     final modelName = params['modelName'] as String;
 
+    print(
+      '[sherpa-onxx-sst] _extractModelInIsolate: ========== Starting extraction ==========',
+    );
+    print('[sherpa-onxx-sst] _extractModelInIsolate: Model: $modelName');
+    print('[sherpa-onxx-sst] _extractModelInIsolate: Archive: $tarBz2Path');
+    print('[sherpa-onxx-sst] _extractModelInIsolate: Destination: $modelDir');
+    print('');
+
+    // Try system tools first (most memory-efficient)
+    final systemExtractionSuccess = await _trySystemExtraction(
+      tarBz2Path,
+      modelDir,
+      modelName,
+      sendPort,
+    );
+
+    if (systemExtractionSuccess) {
+      print(
+        '[sherpa-onxx-sst] _extractModelInIsolate: ✓ System extraction succeeded, skipping Dart implementation',
+      );
+      return;
+    }
+
+    print(
+      '[sherpa-onxx-sst] _extractModelInIsolate: Falling back to Dart archive package implementation',
+    );
+
     sendPort.send({'status': 'reading', 'progress': 0.0});
+    print(
+      '[sherpa-onxx-sst] _extractModelInIsolate: [0%] Reading archive file...',
+    );
 
     // Read the tar.bz2 file in chunks to reduce peak memory
     final tarBz2File = File(tarBz2Path);
     final fileSize = await tarBz2File.length();
+    print(
+      '[sherpa-onxx-sst] _extractModelInIsolate: Archive size: ${(fileSize / 1024 / 1024).toStringAsFixed(2)} MB',
+    );
 
     // For very large files, warn about memory usage
     if (fileSize > 500 * 1024 * 1024) {
       // > 500MB
+      print(
+        '[sherpa-onxx-sst] _extractModelInIsolate: ⚠️  WARNING - Large file detected, extraction may use significant memory',
+      );
       sendPort.send({
         'status': 'warning',
         'message':
@@ -83,6 +202,9 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
 
     // Read file - this is still necessary for bzip2 decompression
     tarBz2Bytes = await tarBz2File.readAsBytes();
+    print(
+      '[sherpa-onxx-sst] _extractModelInIsolate: [10%] ✓ Read ${(tarBz2Bytes.length / 1024 / 1024).toStringAsFixed(2)} MB into memory',
+    );
     sendPort.send({
       'status': 'read',
       'progress': 10.0,
@@ -90,16 +212,22 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
     });
 
     // Decompress bzip2
+    print(
+      '[sherpa-onxx-sst] _extractModelInIsolate: [15%] Decompressing bzip2 archive...',
+    );
     sendPort.send({'status': 'decompressing', 'progress': 15.0});
     final bz2Decoder = BZip2Decoder();
     tarBytes = bz2Decoder.decodeBytes(tarBz2Bytes);
 
     // Clear compressed bytes from memory immediately after decompression
     tarBz2Bytes = null;
+    
+    // Yield control to allow GC to reclaim memory
+    await Future.delayed(const Duration(milliseconds: 50));
 
-    // Force garbage collection hint (Dart VM will handle this)
-    // Note: Dart doesn't have explicit GC, but clearing references helps
-
+    print(
+      '[sherpa-onxx-sst] _extractModelInIsolate: [40%] ✓ Decompressed to ${(tarBytes.length / 1024 / 1024).toStringAsFixed(2)} MB',
+    );
     sendPort.send({
       'status': 'decompressed',
       'progress': 40.0,
@@ -107,13 +235,25 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
     });
 
     // Extract tar archive
+    print(
+      '[sherpa-onxx-sst] _extractModelInIsolate: [45%] Decoding tar archive...',
+    );
     sendPort.send({'status': 'decoding', 'progress': 45.0});
     final tarDecoder = TarDecoder();
     archive = tarDecoder.decodeBytes(tarBytes);
 
     // Clear tar bytes from memory after decoding
     tarBytes = null;
+    
+    // Yield control to allow GC to reclaim memory
+    await Future.delayed(const Duration(milliseconds: 50));
+    
+    // Yield control to allow GC to reclaim memory
+    await Future.delayed(const Duration(milliseconds: 50));
 
+    print(
+      '[sherpa-onxx-sst] _extractModelInIsolate: [50%] ✓ Decoded ${archive.files.length} files from tar archive',
+    );
     sendPort.send({
       'status': 'decoded',
       'progress': 50.0,
@@ -121,11 +261,20 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
     });
 
     // Extract all files one at a time, clearing file content after writing
+    // Process files immediately and clear content to reduce memory pressure
     int fileCount = 0;
     final fileList = archive.files.where((f) => f.isFile).toList();
     final totalFiles = fileList.length;
 
-    for (final file in fileList) {
+    print(
+      '[sherpa-onxx-sst] _extractModelInIsolate: [50%] Starting extraction of $totalFiles files...',
+    );
+    print('');
+
+    // Process files in batches with delays to allow GC
+    const batchSize = 3; // Process 3 files, then yield
+    for (int i = 0; i < fileList.length; i++) {
+      final file = fileList[i];
       fileCount++;
       final filename = file.name;
 
@@ -161,21 +310,38 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
       }
 
       final outputFile = File('$modelDir/$relativePath');
+      final progressPercent = (50.0 + (fileCount / totalFiles) * 50.0)
+          .toStringAsFixed(1);
+
       try {
         await outputFile.parent.create(recursive: true);
 
         // Write file content
         final content = file.content;
+        final fileSize = content is List<int>
+            ? content.length
+            : (content is Uint8List ? content.length : 0);
+
         if (content is List<int>) {
           await outputFile.writeAsBytes(content);
         } else if (content is Uint8List) {
           await outputFile.writeAsBytes(content);
         }
 
+        // Log extracted file
+        final sizeStr = fileSize > 1024 * 1024
+            ? '${(fileSize / 1024 / 1024).toStringAsFixed(2)} MB'
+            : fileSize > 1024
+            ? '${(fileSize / 1024).toStringAsFixed(2)} KB'
+            : '$fileSize B';
+        print(
+          '[sherpa-onxx-sst] _extractModelInIsolate: [$progressPercent%] ✓ Extracted ($fileCount/$totalFiles): $relativePath ($sizeStr)',
+        );
+
         // Log all extracted files for debugging
         sendPort.send({
           'status': 'extracting',
-          'progress': progress,
+          'progress': 50.0 + (fileCount / totalFiles) * 50.0,
           'fileCount': fileCount,
           'totalFiles': totalFiles,
           'currentFile': filename,
@@ -186,13 +352,34 @@ Future<void> _extractModelInIsolate(Map<String, dynamic> params) async {
 
         // Clear file content reference after writing (help GC)
         // Note: file.content is still in memory in the archive, but we've written it
+        
+        // Try to clear file content if possible (archive package limitation)
+        // The archive keeps references, but we've written the file
+        
       } catch (e) {
+        print(
+          '[sherpa-onxx-sst] _extractModelInIsolate: ✗ ERROR extracting $filename: $e',
+        );
         sendPort.send({'error': 'Failed to extract $filename: $e'});
+      }
+
+      // Yield control every batchSize files to allow GC and reduce memory pressure
+      if (i > 0 && i % batchSize == 0) {
+        await Future.delayed(const Duration(milliseconds: 10));
+        // Force a small delay to allow GC
       }
     }
 
     // Clear archive reference
     archive = null;
+
+    print(
+      '[sherpa-onxx-sst] _extractModelInIsolate: [100%] ✓ Extraction complete! Extracted $fileCount files',
+    );
+    print(
+      '[sherpa-onxx-sst] _extractModelInIsolate: ========== Extraction finished ==========',
+    );
+    print('');
 
     sendPort.send({
       'status': 'completed',
@@ -229,6 +416,35 @@ class SherpaOnnxSTTHelper {
       final modelDir = '${documentsDir.path}/sherpa_onnx_models/$modelName';
       print('[sherpa-onxx-sst] modelExistsByName: Model directory=$modelDir');
 
+      // Determine model type
+      final isWhisperModel = modelName.contains('whisper');
+      final isParaformerModel = modelName.contains('paraformer');
+      print(
+        '[sherpa-onxx-sst] modelExistsByName: Is Whisper model: $isWhisperModel',
+      );
+      print(
+        '[sherpa-onxx-sst] modelExistsByName: Is Paraformer model: $isParaformerModel',
+      );
+
+      if (isParaformerModel) {
+        // Paraformer models use a single model.onnx file
+        final modelFile = File('$modelDir/model.onnx');
+        final tokensFile = File('$modelDir/tokens.txt');
+        
+        final modelExists = await modelFile.exists();
+        final tokensExists = await tokensFile.exists();
+        
+        print(
+          '[sherpa-onxx-sst] modelExistsByName: model.onnx exists: $modelExists',
+        );
+        print('[sherpa-onxx-sst] modelExistsByName: tokensExists=$tokensExists');
+        
+        final allExist = modelExists && tokensExists;
+        print('[sherpa-onxx-sst] modelExistsByName: Result=$allExist');
+        return allExist;
+      }
+
+      // Transducer/Zipformer models use encoder/decoder/joiner files
       final encoderFile = File('$modelDir/encoder.onnx');
       final decoderFile = File('$modelDir/decoder.onnx');
       final joinerFile = File('$modelDir/joiner.onnx');
@@ -247,12 +463,6 @@ class SherpaOnnxSTTHelper {
       );
       print('[sherpa-onxx-sst] modelExistsByName: joinerExists=$joinerExists');
       print('[sherpa-onxx-sst] modelExistsByName: tokensExists=$tokensExists');
-
-      // Determine if this is a Whisper model (no joiner required)
-      final isWhisperModel = modelName.contains('whisper');
-      print(
-        '[sherpa-onxx-sst] modelExistsByName: Is Whisper model: $isWhisperModel',
-      );
 
       // For Whisper models, joiner is not required
       final allExist =
@@ -290,35 +500,58 @@ class SherpaOnnxSTTHelper {
     );
     await Directory(modelDir).create(recursive: true);
 
-    // Check if model files already exist
-    final encoderFile = File('$modelDir/encoder.onnx');
-    final decoderFile = File('$modelDir/decoder.onnx');
-    final joinerFile = File('$modelDir/joiner.onnx');
-    final tokensFile = File('$modelDir/tokens.txt');
-
-    final encoderExists = await encoderFile.exists();
-    final decoderExists = await decoderFile.exists();
-    final joinerExists = await joinerFile.exists();
-    final tokensExists = await tokensFile.exists();
-
-    // Determine if this is a Whisper model (no joiner required)
+    // Determine model type
     final isWhisperModel = modelName.contains('whisper');
+    final isParaformerModel = modelName.contains('paraformer');
     print(
       '[sherpa-onxx-sst] ensureModelExistsByName: Is Whisper model: $isWhisperModel',
     );
+    print(
+      '[sherpa-onxx-sst] ensureModelExistsByName: Is Paraformer model: $isParaformerModel',
+    );
 
-    // For Whisper models, joiner is not required
-    final modelExists =
-        encoderExists &&
-        decoderExists &&
-        tokensExists &&
-        (isWhisperModel || joinerExists);
-    print(
-      '[sherpa-onxx-sst] ensureModelExistsByName: Model files exist=$modelExists',
-    );
-    print(
-      '[sherpa-onxx-sst] ensureModelExistsByName: encoderExists=$encoderExists, decoderExists=$decoderExists, joinerExists=$joinerExists, tokensExists=$tokensExists',
-    );
+    bool modelExists = false;
+    
+    if (isParaformerModel) {
+      // Paraformer models use a single model.onnx file
+      final modelFile = File('$modelDir/model.onnx');
+      final tokensFile = File('$modelDir/tokens.txt');
+      
+      final modelFileExists = await modelFile.exists();
+      final tokensExists = await tokensFile.exists();
+      
+      modelExists = modelFileExists && tokensExists;
+      print(
+        '[sherpa-onxx-sst] ensureModelExistsByName: Model files exist=$modelExists',
+      );
+      print(
+        '[sherpa-onxx-sst] ensureModelExistsByName: model.onnx exists=$modelFileExists, tokensExists=$tokensExists',
+      );
+    } else {
+      // Transducer/Zipformer models use encoder/decoder/joiner files
+      final encoderFile = File('$modelDir/encoder.onnx');
+      final decoderFile = File('$modelDir/decoder.onnx');
+      final joinerFile = File('$modelDir/joiner.onnx');
+      final tokensFile = File('$modelDir/tokens.txt');
+
+      final encoderExists = await encoderFile.exists();
+      final decoderExists = await decoderFile.exists();
+      final joinerExists = await joinerFile.exists();
+      final tokensExists = await tokensFile.exists();
+
+      // For Whisper models, joiner is not required
+      modelExists =
+          encoderExists &&
+          decoderExists &&
+          tokensExists &&
+          (isWhisperModel || joinerExists);
+      print(
+        '[sherpa-onxx-sst] ensureModelExistsByName: Model files exist=$modelExists',
+      );
+      print(
+        '[sherpa-onxx-sst] ensureModelExistsByName: encoderExists=$encoderExists, decoderExists=$decoderExists, joinerExists=$joinerExists, tokensExists=$tokensExists',
+      );
+    }
 
     if (!modelExists) {
       // Model doesn't exist, check if downloaded file exists
@@ -395,13 +628,87 @@ class SherpaOnnxSTTHelper {
       '[sherpa-onxx-sst] initializeRecognizerByName: Model directory=$modelDir',
     );
 
-    // Initialize Sherpa-ONNX recognizer
+    // Determine model type
+    final isWhisperModel = modelName.contains('whisper');
+    final isParaformerModel = modelName.contains('paraformer');
+    
+    print('[sherpa-onxx-sst] initializeRecognizerByName: Checking files...');
+    print(
+      '[sherpa-onxx-sst] initializeRecognizerByName: Is Whisper model: $isWhisperModel',
+    );
+    print(
+      '[sherpa-onxx-sst] initializeRecognizerByName: Is Paraformer model: $isParaformerModel',
+    );
+
+    if (isParaformerModel) {
+      // Paraformer models use a single model.onnx file
+      final modelPath = '$modelDir/model.onnx';
+      final tokensPath = '$modelDir/tokens.txt';
+
+      print(
+        '[sherpa-onxx-sst] initializeRecognizerByName: modelPath=$modelPath',
+      );
+      print(
+        '[sherpa-onxx-sst] initializeRecognizerByName: tokensPath=$tokensPath',
+      );
+
+      // Check files exist
+      final modelFile = File(modelPath);
+      final tokensFile = File(tokensPath);
+      
+      final modelExists = await modelFile.exists();
+      final tokensExists = await tokensFile.exists();
+
+      print(
+        '[sherpa-onxx-sst] initializeRecognizerByName: model.onnx exists: $modelExists',
+      );
+      print(
+        '[sherpa-onxx-sst] initializeRecognizerByName: tokensExists=$tokensExists',
+      );
+
+      if (!modelExists || !tokensExists) {
+        print(
+          '[sherpa-onxx-sst] initializeRecognizerByName: ERROR - Paraformer model files missing!',
+        );
+        throw Exception('Paraformer model files missing');
+      }
+
+      // Yield control to UI thread
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      print(
+        '[sherpa-onxx-sst] initializeRecognizerByName: All files exist, creating Paraformer recognizer config...',
+      );
+
+      // Use Paraformer config
+      final modelConfig = OfflineModelConfig(
+        paraformer: OfflineParaformerModelConfig(model: modelPath),
+        tokens: tokensPath,
+      );
+
+      final recognizerConfig = OfflineRecognizerConfig(
+        model: modelConfig,
+        feat: FeatureConfig(sampleRate: 16000),
+      );
+
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      print(
+        '[sherpa-onxx-sst] initializeRecognizerByName: Creating OfflineRecognizer (Paraformer)...',
+      );
+      final recognizer = OfflineRecognizer(recognizerConfig);
+      print(
+        '[sherpa-onxx-sst] initializeRecognizerByName: Recognizer created successfully',
+      );
+      return recognizer;
+    }
+
+    // Transducer/Zipformer models use encoder/decoder/joiner files
     final encoderPath = '$modelDir/encoder.onnx';
     final decoderPath = '$modelDir/decoder.onnx';
     final joinerPath = '$modelDir/joiner.onnx';
     final tokensPath = '$modelDir/tokens.txt';
 
-    print('[sherpa-onxx-sst] initializeRecognizerByName: Checking files...');
     print(
       '[sherpa-onxx-sst] initializeRecognizerByName: encoderPath=$encoderPath',
     );
@@ -435,9 +742,6 @@ class SherpaOnnxSTTHelper {
     print(
       '[sherpa-onxx-sst] initializeRecognizerByName: tokensExists=${fileCheckResult['tokensExists']}',
     );
-
-    // Determine if this is a Whisper model (no joiner required)
-    final isWhisperModel = modelName.contains('whisper');
 
     // For Whisper models, joiner is not required
     final requiredFilesExist =
@@ -608,6 +912,12 @@ class SherpaOnnxSTTHelper {
 
         chunkCount++;
 
+        // Yield control to UI thread periodically to prevent UI lockup
+        // Yield every 5 chunks (~500ms) to keep UI responsive
+        if (chunkCount % 5 == 0) {
+          await Future.delayed(Duration.zero);
+        }
+
         // Get partial results periodically (every 10 chunks = ~1 second of audio)
         if (onPartialResult != null && chunkCount % 10 == 0) {
           try {
@@ -617,6 +927,8 @@ class SherpaOnnxSTTHelper {
               print(
                 '[sherpa-onxx-sst] transcribeAudio: Partial result: "${partialResult.text}"',
               );
+              // Yield control before calling callback to ensure UI updates
+              await Future.delayed(Duration.zero);
               onPartialResult(partialResult.text);
             }
           } catch (e) {
@@ -992,10 +1304,21 @@ class SherpaOnnxSTTHelper {
     }
 
     // Files don't exist, proceed with extraction
+    print(
+      '[sherpa-onxx-sst] _extractModel: ========== Starting extraction process ==========',
+    );
+    print('[sherpa-onxx-sst] _extractModel: Archive: ${tarBz2File.path}');
+    print('[sherpa-onxx-sst] _extractModel: Destination: $modelDir');
+    print('[sherpa-onxx-sst] _extractModel: Model: $modelName');
+    print('');
+
     // Create a receive port to get progress updates from the isolate
     final receivePort = ReceivePort();
 
     // Spawn isolate for background extraction
+    print(
+      '[sherpa-onxx-sst] _extractModel: Spawning isolate for background extraction...',
+    );
     await Isolate.spawn(_extractModelInIsolate, {
       'sendPort': receivePort.sendPort,
       'tarBz2Path': tarBz2File.path,
@@ -1007,7 +1330,18 @@ class SherpaOnnxSTTHelper {
     await for (final message in receivePort) {
       if (message is Map<String, dynamic>) {
         if (message.containsKey('error')) {
-          throw Exception(message['error']);
+          final errorMsg = message['error'] as String;
+          final stackTrace = message['stackTrace'] as String?;
+          print('[sherpa-onxx-sst] _extractModel: ✗✗✗ EXTRACTION ERROR ✗✗✗');
+          print('[sherpa-onxx-sst] _extractModel: Error: $errorMsg');
+          if (stackTrace != null) {
+            print('[sherpa-onxx-sst] _extractModel: Stack trace: $stackTrace');
+          }
+          print(
+            '[sherpa-onxx-sst] _extractModel: ========== Extraction failed ==========',
+          );
+          print('');
+          throw Exception(errorMsg);
         }
 
         final status = message['status'] as String?;
@@ -1065,6 +1399,83 @@ class SherpaOnnxSTTHelper {
             break;
           case 'completed':
             statusText = 'Extraction complete! (${message['fileCount']} files)';
+            break;
+        }
+
+        // Log progress to console
+        final progressPercent = progress.toStringAsFixed(1);
+        switch (status) {
+          case 'reading':
+            print(
+              '[sherpa-onxx-sst] _extractModel: [$progressPercent%] Reading archive file...',
+            );
+            break;
+          case 'read':
+            final size = message['size'] as int?;
+            if (size != null) {
+              print(
+                '[sherpa-onxx-sst] _extractModel: [$progressPercent%] ✓ Read ${(size / 1024 / 1024).toStringAsFixed(2)} MB',
+              );
+            }
+            break;
+          case 'decompressing':
+            print(
+              '[sherpa-onxx-sst] _extractModel: [$progressPercent%] Decompressing bzip2 archive...',
+            );
+            break;
+          case 'decompressed':
+            final size = message['size'] as int?;
+            if (size != null) {
+              print(
+                '[sherpa-onxx-sst] _extractModel: [$progressPercent%] ✓ Decompressed to ${(size / 1024 / 1024).toStringAsFixed(2)} MB',
+              );
+            }
+            break;
+          case 'decoding':
+            print(
+              '[sherpa-onxx-sst] _extractModel: [$progressPercent%] Decoding tar archive...',
+            );
+            break;
+          case 'decoded':
+            final fileCount = message['fileCount'] as int?;
+            if (fileCount != null) {
+              print(
+                '[sherpa-onxx-sst] _extractModel: [$progressPercent%] ✓ Decoded $fileCount files from tar archive',
+              );
+            }
+            break;
+          case 'extracting':
+            if (fileCount != null &&
+                totalFiles != null &&
+                currentFile != null) {
+              final fileName = currentFile.split('/').last;
+              print(
+                '[sherpa-onxx-sst] _extractModel: [$progressPercent%] Extracting file $fileCount/$totalFiles: $fileName',
+              );
+            }
+            break;
+          case 'completed':
+            final fileCount = message['fileCount'] as int?;
+            if (fileCount != null) {
+              print(
+                '[sherpa-onxx-sst] _extractModel: [$progressPercent%] ✓✓✓ EXTRACTION COMPLETE ✓✓✓',
+              );
+              print(
+                '[sherpa-onxx-sst] _extractModel: Successfully extracted $fileCount files',
+              );
+              print(
+                '[sherpa-onxx-sst] _extractModel: ========== Extraction process finished ==========',
+              );
+              print('');
+            }
+            break;
+          case 'warning':
+            final warningMsg = message['message'] as String?;
+            if (warningMsg != null) {
+              print(
+                '[sherpa-onxx-sst] _extractModel: ⚠️  WARNING: $warningMsg',
+              );
+            }
             break;
         }
 
@@ -1189,6 +1600,22 @@ class SherpaOnnxSTTHelper {
             '[sherpa-onxx-sst] _findModelFiles: Found tokens candidate: $fullPath',
           );
         }
+        // Find model.onnx for Paraformer models (prefer non-INT8 version)
+        if (name == 'model.onnx' || name == 'model.int8.onnx') {
+          if (foundFiles['model'] == null) {
+            foundFiles['model'] = entity;
+            print(
+              '[sherpa-onxx-sst] _findModelFiles: Found model candidate: $fullPath',
+            );
+          } else if (name == 'model.onnx' &&
+              foundFiles['model']!.path.toLowerCase().contains('.int8')) {
+            // Prefer non-INT8 version
+            print(
+              '[sherpa-onxx-sst] _findModelFiles: Found better model (non-INT8): $fullPath',
+            );
+            foundFiles['model'] = entity;
+          }
+        }
       }
     }
 
@@ -1205,6 +1632,9 @@ class SherpaOnnxSTTHelper {
     );
     print(
       '[sherpa-onxx-sst] _findModelFiles: - tokens: ${foundFiles['tokens']?.path ?? "not found"}',
+    );
+    print(
+      '[sherpa-onxx-sst] _findModelFiles: - model: ${foundFiles['model']?.path ?? "not found"}',
     );
 
     return foundFiles;
@@ -1436,12 +1866,14 @@ class SherpaOnnxSTTHelper {
     );
     print('');
 
-    // 6. Model files dump (all files in directory)
-    print('📋 ALL FILES IN MODEL DIRECTORY:');
+    // 6. Model files dump (tree structure)
+    print('📋 DIRECTORY TREE:');
     try {
       int fileCount = 0;
       int totalSize = 0;
-      final files = <String, int>{};
+
+      // Build tree structure
+      final tree = <String, Map<String, dynamic>>{};
 
       await for (final entity in modelDirFile.list(recursive: true)) {
         if (entity is File) {
@@ -1449,11 +1881,33 @@ class SherpaOnnxSTTHelper {
           final size = await entity.length();
           totalSize += size;
           final relativePath = entity.path.replaceFirst('$modelDir/', '');
-          files[relativePath] = size;
+
+          // Build tree structure
+          final parts = relativePath.split('/');
+          Map<String, dynamic> current = tree;
+
+          for (int i = 0; i < parts.length; i++) {
+            final part = parts[i];
+            final isLast = i == parts.length - 1;
+
+            if (isLast) {
+              // File
+              if (!current.containsKey('_files')) {
+                current['_files'] = <String, int>{};
+              }
+              (current['_files'] as Map<String, int>)[part] = size;
+            } else {
+              // Directory
+              if (!current.containsKey(part)) {
+                current[part] = <String, dynamic>{};
+              }
+              current = current[part] as Map<String, dynamic>;
+            }
+          }
         }
       }
 
-      if (files.isEmpty) {
+      if (fileCount == 0) {
         print('   (No files found)');
       } else {
         print('   Total files: $fileCount');
@@ -1461,19 +1915,8 @@ class SherpaOnnxSTTHelper {
           '   Total size: ${(totalSize / 1024 / 1024).toStringAsFixed(2)} MB',
         );
         print('');
-        print('   Files:');
-        final sortedFiles = files.entries.toList()
-          ..sort((a, b) => a.key.compareTo(b.key));
-
-        for (final entry in sortedFiles) {
-          final size = entry.value;
-          final sizeStr = size > 1024 * 1024
-              ? '${(size / 1024 / 1024).toStringAsFixed(2)} MB'
-              : size > 1024
-              ? '${(size / 1024).toStringAsFixed(2)} KB'
-              : '$size B';
-          print('     • ${entry.key} ($sizeStr)');
-        }
+        print('   $modelName/');
+        _printTree(tree, modelDir, prefix: '   ', isLast: true);
       }
     } catch (e) {
       print('   ⚠ Error listing files: $e');
@@ -1507,5 +1950,69 @@ class SherpaOnnxSTTHelper {
 
     print('═══════════════════════════════════════════════════════════════');
     print('');
+  }
+
+  /// Print directory tree structure (similar to Unix 'tree' command)
+  static void _printTree(
+    Map<String, dynamic> tree,
+    String basePath, {
+    String prefix = '',
+    bool isLast = true,
+  }) {
+    final entries = <String>[];
+
+    // Collect directories and files
+    for (final key in tree.keys) {
+      if (key != '_files') {
+        entries.add(key);
+      }
+    }
+
+    // Add files at the end
+    if (tree.containsKey('_files')) {
+      final files = tree['_files'] as Map<String, int>;
+      entries.addAll(files.keys);
+    }
+
+    // Sort entries (directories first, then files)
+    entries.sort((a, b) {
+      final aIsDir = tree.containsKey(a) && tree[a] is Map;
+      final bIsDir = tree.containsKey(b) && tree[b] is Map;
+
+      if (aIsDir && !bIsDir) return -1;
+      if (!aIsDir && bIsDir) return 1;
+      return a.compareTo(b);
+    });
+
+    for (int i = 0; i < entries.length; i++) {
+      final entry = entries[i];
+      final isLastEntry = i == entries.length - 1;
+      final isDirectory = tree.containsKey(entry) && tree[entry] is Map;
+
+      // Determine prefix characters
+      final connector = isLastEntry ? '└── ' : '├── ';
+      final nextPrefix = isLastEntry ? '    ' : '│   ';
+
+      if (isDirectory) {
+        // Directory
+        print('$prefix$connector$entry/');
+        _printTree(
+          tree[entry] as Map<String, dynamic>,
+          '$basePath/$entry',
+          prefix: '$prefix$nextPrefix',
+          isLast: isLastEntry,
+        );
+      } else {
+        // File
+        final files = tree['_files'] as Map<String, int>;
+        final size = files[entry]!;
+        final sizeStr = size > 1024 * 1024
+            ? '${(size / 1024 / 1024).toStringAsFixed(2)} MB'
+            : size > 1024
+            ? '${(size / 1024).toStringAsFixed(2)} KB'
+            : '$size B';
+        print('$prefix$connector$entry ($sizeStr)');
+      }
+    }
   }
 }

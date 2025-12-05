@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -113,7 +114,9 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
       '[sherpa-onnx-btn] initState: sherpaModel=${widget.sherpaModel?.displayName ?? "null"} (${widget.sherpaModel?.modelName ?? widget.customModelName ?? "none"})',
     );
     print('[sherpa-onnx-btn] initState: languageCode=${widget.languageCode}');
-    print('[sherpa-onnx-btn] initState: customModelName=${widget.customModelName}');
+    print(
+      '[sherpa-onnx-btn] initState: customModelName=${widget.customModelName}',
+    );
     _buttonController = AnimationController(
       duration: const Duration(milliseconds: 100),
       vsync: this,
@@ -204,7 +207,9 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
           widget.customModelName!,
         );
       } else {
-        throw Exception('No model provided (neither sherpaModel nor customModelName)');
+        throw Exception(
+          'No model provided (neither sherpaModel nor customModelName)',
+        );
       }
       print(
         '[sherpa-onnx-btn] _initializeSherpa: Recognizer initialized successfully',
@@ -250,7 +255,9 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
     }
 
     if (_isInitializing) {
-      print('[sherpa-onnx-btn] _ensureRecognizerInitialized: Recognizer is initializing, waiting...');
+      print(
+        '[sherpa-onnx-btn] _ensureRecognizerInitialized: Recognizer is initializing, waiting...',
+      );
       // Wait for initialization to complete (with timeout)
       int attempts = 0;
       const maxAttempts = 100; // 10 seconds max wait
@@ -258,21 +265,29 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
         await Future.delayed(const Duration(milliseconds: 100));
         attempts++;
         if (_recognizer != null) {
-          print('[sherpa-onnx-btn] _ensureRecognizerInitialized: Recognizer initialized after waiting');
+          print(
+            '[sherpa-onnx-btn] _ensureRecognizerInitialized: Recognizer initialized after waiting',
+          );
           return true;
         }
       }
-      print('[sherpa-onnx-btn] _ensureRecognizerInitialized: Timeout waiting for initialization');
+      print(
+        '[sherpa-onnx-btn] _ensureRecognizerInitialized: Timeout waiting for initialization',
+      );
       return false;
     }
 
     // Not initializing and recognizer is null, try to initialize
-    print('[sherpa-onnx-btn] _ensureRecognizerInitialized: Recognizer is null, attempting initialization...');
+    print(
+      '[sherpa-onnx-btn] _ensureRecognizerInitialized: Recognizer is null, attempting initialization...',
+    );
     try {
       await _initializeSherpa();
       return _recognizer != null;
     } catch (e) {
-      print('[sherpa-onnx-btn] _ensureRecognizerInitialized: ERROR - Failed to initialize: $e');
+      print(
+        '[sherpa-onnx-btn] _ensureRecognizerInitialized: ERROR - Failed to initialize: $e',
+      );
       return false;
     }
   }
@@ -327,7 +342,9 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
     // Ensure recognizer is initialized before starting recording
     final isReady = await _ensureRecognizerInitialized();
     if (!isReady) {
-      print('[sherpa-onnx-btn] _startRecording: ERROR - Recognizer not initialized, cannot start recording');
+      print(
+        '[sherpa-onnx-btn] _startRecording: ERROR - Recognizer not initialized, cannot start recording',
+      );
       setState(() {
         doingAction = false;
       });
@@ -405,7 +422,9 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
       // Ensure recognizer is initialized before transcribing
       final isReady = await _ensureRecognizerInitialized();
       if (!isReady) {
-        print('[sherpa-onnx-btn] _stopRecording: ERROR - Recognizer not initialized, cannot transcribe');
+        print(
+          '[sherpa-onnx-btn] _stopRecording: ERROR - Recognizer not initialized, cannot transcribe',
+        );
         setState(() {
           doingAction = false;
         });
@@ -463,17 +482,23 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
       return;
     }
 
+    // Update UI state immediately to show processing
     setState(() {
       _isTranscribing = true;
     });
 
+    // Yield control to UI thread to ensure state update is rendered
+    await Future.delayed(Duration.zero);
+
     try {
       // Transcribe using helper with partial result callback for real-time updates
+      // Note: Recognizer operations must stay in main isolate, but we'll yield control periodically
       print(
         '[sherpa-onnx-btn] _transcribeAudio: Calling SherpaOnnxSTTHelper.transcribeAudio with partial results...',
       );
-      final transcribedText = await SherpaOnnxSTTHelper.transcribeAudio(
-        recognizer: _recognizer!,
+
+      // Run transcription in a way that yields control periodically
+      final transcribedText = await _transcribeAudioWithYields(
         audioPath: _currentRecordingPath!,
         onPartialResult: (partialText) {
           // Call callback with partial result in real-time (percentage will be 0 for partial)
@@ -486,14 +511,21 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
           }
         },
       );
+
       print(
         '[sherpa-onnx-btn] _transcribeAudio: Final transcription result: "$transcribedText"',
       );
 
-      // Calculate similarity if expected text is provided
+      // Calculate similarity in an isolate to avoid blocking UI
       int percentage = 0;
       if (widget.expectedText != null && transcribedText.isNotEmpty) {
-        percentage = calculateSimilarity(transcribedText, widget.expectedText!);
+        print(
+          '[sherpa-onnx-btn] _transcribeAudio: Calculating similarity in isolate...',
+        );
+        percentage = await _calculateSimilarityInIsolate(
+          transcribedText,
+          widget.expectedText!,
+        );
         print(
           '[sherpa-onnx-btn] _transcribeAudio: Similarity percentage: $percentage%',
         );
@@ -529,13 +561,64 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
     }
   }
 
+  /// Transcribe audio with periodic yields to keep UI responsive
+  /// Since OfflineRecognizer can't be passed to isolates, yielding happens in transcribeAudio
+  Future<String> _transcribeAudioWithYields({
+    required String audioPath,
+    Function(String)? onPartialResult,
+  }) async {
+    // Yield control before starting transcription to ensure UI state is updated
+    await Future.delayed(Duration.zero);
+
+    // Call transcription - it will yield control periodically internally
+    return await SherpaOnnxSTTHelper.transcribeAudio(
+      recognizer: _recognizer!,
+      audioPath: audioPath,
+      onPartialResult: (partialText) {
+        // Call callback - UI updates will happen on next frame
+        onPartialResult?.call(partialText);
+      },
+    );
+  }
+
+  /// Calculate similarity in an isolate to avoid blocking UI
+  Future<int> _calculateSimilarityInIsolate(
+    String transcribed,
+    String expected,
+  ) async {
+    final receivePort = ReceivePort();
+
+    await Isolate.spawn(_calculateSimilarityIsolate, {
+      'sendPort': receivePort.sendPort,
+      'transcribed': transcribed,
+      'expected': expected,
+    });
+
+    final result = await receivePort.first as int;
+    return result;
+  }
+
+  /// Isolate entry point for similarity calculation
+  static void _calculateSimilarityIsolate(Map<String, dynamic> message) {
+    final sendPort = message['sendPort'] as SendPort;
+    final transcribed = message['transcribed'] as String;
+    final expected = message['expected'] as String;
+
+    try {
+      final percentage = calculateSimilarity(transcribed, expected);
+      sendPort.send(percentage);
+    } catch (e) {
+      sendPort.send(0);
+    }
+  }
+
   //-----------------------------------------------------
   // BUILD WIDGET
   //-----------------------------------------------------
   @override
   Widget build(BuildContext context) {
     final isLoading = _isInitializing || _isTranscribing;
-    final isActive = doingAction || _isRecording;
+    final isActive = doingAction || _isRecording || _isTranscribing;
 
     final label = widget.label ?? 'Press to speak';
 

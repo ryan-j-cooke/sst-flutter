@@ -5,7 +5,6 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart';
 import 'package:stttest/apps/components/bts/sst/sherpa-onnx-btn.dart';
 import 'package:stttest/apps/components/download-card/index.dart';
-import 'package:stttest/apps/components/modal/index.dart';
 import 'package:stttest/consts/languages.dart';
 import 'package:stttest/utils/sherpa-model-dictionary.dart';
 import 'package:stttest/utils/sherpa-onxx-sst.dart';
@@ -495,23 +494,26 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
     print('[main.dart] _showModelDownloadDialogForLanguage: Showing dialog...');
     // Show dialog with all models (even if already downloaded)
     // Pass languageCode and let ModelDownloadCard fetch models itself
-    final result = await AppModal.show<bool>(
+    // Dialog is transparent - content is managed by AppCard in ModelDownloadCard
+    final result = await showDialog<bool>(
       context: context,
-      title: 'Download Models',
-      child: ModelDownloadCard(
-        requiredModels: [], // Empty - will be populated from languageCode
-        languageCode: normalizedCode, // Pass normalized code
-        onAllModelsDownloaded: () {
-          print(
-            '[main.dart] _showModelDownloadDialogForLanguage: onAllModelsDownloaded called',
-          );
-          Navigator.of(context).pop(true);
-        },
-      ),
+      barrierColor: Colors.black.withOpacity(0.5),
       barrierDismissible: true,
-      showCloseButton: true,
-      maxWidth: 600,
-      maxHeightFactor: 0.8,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        child: ModelDownloadCard(
+          requiredModels: [], // Empty - will be populated from languageCode
+          languageCode: normalizedCode, // Pass normalized code
+          onAllModelsDownloaded: () {
+            print(
+              '[main.dart] _showModelDownloadDialogForLanguage: onAllModelsDownloaded called',
+            );
+            Navigator.of(context).pop(true);
+          },
+        ),
+      ),
     );
 
     print(
@@ -577,20 +579,23 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
     // Use the provided model or default to first available
     final modelsToDownload = model != null ? [model] : availableModels;
 
-    final result = await AppModal.show<bool>(
+    // Dialog is transparent - content is managed by AppCard in ModelDownloadCard
+    final result = await showDialog<bool>(
       context: context,
-      title: 'Download Models',
-      child: ModelDownloadCard(
-        requiredModels: modelsToDownload,
-        languageCode: selectedLang!.code,
-        onAllModelsDownloaded: () {
-          Navigator.of(context).pop(true);
-        },
-      ),
+      barrierColor: Colors.black.withValues(alpha: 0.5),
       barrierDismissible: true,
-      showCloseButton: true,
-      maxWidth: 600,
-      maxHeightFactor: 0.8,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        child: ModelDownloadCard(
+          requiredModels: modelsToDownload,
+          languageCode: selectedLang!.code,
+          onAllModelsDownloaded: () {
+            Navigator.of(context).pop(true);
+          },
+        ),
+      ),
     );
 
     if (result == true && mounted && selectedLang != null) {

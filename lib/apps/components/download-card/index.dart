@@ -238,37 +238,59 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
       for (final modelName in modelNames) {
         final modelDir = '$baseModelDir/$modelName';
 
-        // Check if required model files exist
-        final encoderFile = File('$modelDir/encoder.onnx');
-        final decoderFile = File('$modelDir/decoder.onnx');
-        final joinerFile = File('$modelDir/joiner.onnx');
-        final tokensFile = File('$modelDir/tokens.txt');
-
-        final encoderExists = await encoderFile.exists();
-        final decoderExists = await decoderFile.exists();
-        final joinerExists = await joinerFile.exists();
-        final tokensExists = await tokensFile.exists();
-
-        // Determine if this is a Whisper model (no joiner required)
+        // Determine model type
         final isWhisperModel = modelName.contains('whisper');
+        final isParaformerModel = modelName.contains('paraformer');
 
-        // For Whisper models, joiner is not required
-        final modelFilesExist =
-            encoderExists &&
-            decoderExists &&
-            tokensExists &&
-            (isWhisperModel || joinerExists);
+        bool modelFilesExist = false;
 
-        print('[download-card] _checkModelsExistIsolate: Model=$modelName');
-        print(
-          '[download-card] _checkModelsExistIsolate: encoderExists=$encoderExists, decoderExists=$decoderExists, joinerExists=$joinerExists, tokensExists=$tokensExists',
-        );
-        print(
-          '[download-card] _checkModelsExistIsolate: isWhisperModel=$isWhisperModel',
-        );
-        print(
-          '[download-card] _checkModelsExistIsolate: modelFilesExist=$modelFilesExist',
-        );
+        if (isParaformerModel) {
+          // Paraformer models use a single model.onnx file
+          final modelFile = File('$modelDir/model.onnx');
+          final tokensFile = File('$modelDir/tokens.txt');
+
+          final modelExists = await modelFile.exists();
+          final tokensExists = await tokensFile.exists();
+
+          modelFilesExist = modelExists && tokensExists;
+
+          print('[download-card] _checkModelsExistIsolate: Model=$modelName (Paraformer)');
+          print(
+            '[download-card] _checkModelsExistIsolate: model.onnx exists=$modelExists, tokensExists=$tokensExists',
+          );
+          print(
+            '[download-card] _checkModelsExistIsolate: modelFilesExist=$modelFilesExist',
+          );
+        } else {
+          // Transducer/Zipformer models use encoder/decoder/joiner files
+          final encoderFile = File('$modelDir/encoder.onnx');
+          final decoderFile = File('$modelDir/decoder.onnx');
+          final joinerFile = File('$modelDir/joiner.onnx');
+          final tokensFile = File('$modelDir/tokens.txt');
+
+          final encoderExists = await encoderFile.exists();
+          final decoderExists = await decoderFile.exists();
+          final joinerExists = await joinerFile.exists();
+          final tokensExists = await tokensFile.exists();
+
+          // For Whisper models, joiner is not required
+          modelFilesExist =
+              encoderExists &&
+              decoderExists &&
+              tokensExists &&
+              (isWhisperModel || joinerExists);
+
+          print('[download-card] _checkModelsExistIsolate: Model=$modelName (${isWhisperModel ? "Whisper" : "Transducer/Zipformer"})');
+          print(
+            '[download-card] _checkModelsExistIsolate: encoderExists=$encoderExists, decoderExists=$decoderExists, joinerExists=$joinerExists, tokensExists=$tokensExists',
+          );
+          print(
+            '[download-card] _checkModelsExistIsolate: isWhisperModel=$isWhisperModel',
+          );
+          print(
+            '[download-card] _checkModelsExistIsolate: modelFilesExist=$modelFilesExist',
+          );
+        }
 
         results[modelName] = modelFilesExist;
 

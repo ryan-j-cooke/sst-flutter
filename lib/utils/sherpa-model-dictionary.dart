@@ -1,5 +1,7 @@
 import 'package:stttest/utils/sherpa-onxx-sst.dart';
 
+// Must DO: On android add "android:largeHeap="true"" to the manifest file to avoid Out of Memory errors
+
 /// Model accuracy levels
 enum ModelAccuracy { lowest, low, moderate, high, highest }
 

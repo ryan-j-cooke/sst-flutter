@@ -2,6 +2,7 @@ import '../typeography/h3.dart';
 import '../page.dart';
 import 'package:flutter/material.dart';
 import 'package:stttest/utils/sherpa-model-dictionary.dart';
+import 'package:stttest/utils/sherpa-onxx-sst.dart';
 import 'package:stttest/apps/services/tutor/tutor.service.dart';
 
 /// Step 2 Content Widget
@@ -10,7 +11,8 @@ import 'package:stttest/apps/services/tutor/tutor.service.dart';
 class Step2Content extends StatefulWidget {
   final bool canProceed;
   final String languageCode;
-  final List<SherpaModelVariant> availableModels; // Changed to support both enum and custom
+  final List<SherpaModelVariant>
+  availableModels; // Changed to support both enum and custom
   final VoidCallback? onSaveComplete;
 
   const Step2Content({
@@ -30,19 +32,63 @@ class _Step2ContentState extends State<Step2Content> {
   bool _isLoading = true;
   bool _isSaving = false;
   bool _isSaved = false;
+  List<SherpaModelVariant> _downloadedModels =
+      []; // Filtered list of downloaded models
 
   @override
   void initState() {
     super.initState();
-    _loadSavedModel();
+    _filterDownloadedModels();
   }
 
-  /// Load the saved model priority for this language
-  Future<void> _loadSavedModel() async {
+  /// Filter available models to only show those that are downloaded and valid
+  Future<void> _filterDownloadedModels() async {
     setState(() {
       _isLoading = true;
     });
 
+    try {
+      final downloadedModels = <SherpaModelVariant>[];
+
+      // Check each model to see if it's downloaded and valid
+      for (final variant in widget.availableModels) {
+        final modelName = variant.modelName;
+        final exists = await SherpaOnnxSTTHelper.modelExistsByName(modelName);
+
+        if (exists) {
+          downloadedModels.add(variant);
+          print(
+            '[step-2] _filterDownloadedModels: Model ${variant.displayName} exists and is valid',
+          );
+        } else {
+          print(
+            '[step-2] _filterDownloadedModels: Model ${variant.displayName} not found, skipping',
+          );
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _downloadedModels = downloadedModels;
+          _isLoading = false;
+        });
+
+        // Load saved model after filtering
+        _loadSavedModel();
+      }
+    } catch (e) {
+      print('[step-2] _filterDownloadedModels: ERROR - $e');
+      if (mounted) {
+        setState(() {
+          _downloadedModels = [];
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  /// Load the saved model priority for this language
+  Future<void> _loadSavedModel() async {
     try {
       // Get saved model name (works for both enum and custom models)
       final savedModelName = await TutorService.getModelPriorityName(
@@ -51,33 +97,30 @@ class _Step2ContentState extends State<Step2Content> {
 
       if (mounted) {
         setState(() {
-          // Check if we have any available models
-          if (widget.availableModels.isEmpty) {
+          // Check if we have any downloaded models
+          if (_downloadedModels.isEmpty) {
             _selectedModel = null;
-            _isLoading = false;
             return;
           }
 
           // Find the saved model by comparing modelName
           if (savedModelName != null) {
-            _selectedModel = widget.availableModels.firstWhere(
+            _selectedModel = _downloadedModels.firstWhere(
               (variant) => variant.modelName == savedModelName,
-              orElse: () => widget.availableModels.first,
+              orElse: () => _downloadedModels.first,
             );
           } else {
-            _selectedModel = widget.availableModels.first;
+            _selectedModel = _downloadedModels.first;
           }
-          _isLoading = false;
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
           // Default to first available on error, or null if list is empty
-          _selectedModel = widget.availableModels.isNotEmpty
-              ? widget.availableModels.first
+          _selectedModel = _downloadedModels.isNotEmpty
+              ? _downloadedModels.first
               : null;
-          _isLoading = false;
         });
       }
     }
@@ -214,7 +257,6 @@ class _Step2ContentState extends State<Step2Content> {
       );
     }
 
-
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -242,7 +284,7 @@ class _Step2ContentState extends State<Step2Content> {
         ),
         const SizedBox(height: 16),
 
-        // Model selection list
+        // Scrollable models list with auto height (up to max) - same as step-1
         if (_isLoading)
           const Center(
             child: Padding(
@@ -250,102 +292,157 @@ class _Step2ContentState extends State<Step2Content> {
               child: CircularProgressIndicator(),
             ),
           )
-        else
-          ...widget.availableModels.map((variant) {
-            final isSelected = _selectedModel == variant;
-            final displayName = variant.displayName;
-            final fileSize = variant.fileSize;
-
-            return Container(
-              margin: const EdgeInsets.only(bottom: 6),
-              decoration: BoxDecoration(
-                color: isSelected ? Colors.blue[50] : Colors.grey[50],
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: isSelected ? Colors.blue[300]! : Colors.grey[300]!,
-                  width: isSelected ? 2 : 1,
-                ),
-              ),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: () => _selectModel(variant),
-                  borderRadius: BorderRadius.circular(12),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                    child: Row(
-                      children: [
-                        // Radio button
-                        Container(
-                          width: 24,
-                          height: 24,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: isSelected
-                                  ? Colors.blue[700]!
-                                  : Colors.grey[400]!,
-                              width: 2,
-                            ),
-                            color: isSelected
-                                ? Colors.blue[700]
-                                : Colors.transparent,
-                          ),
-                          child: isSelected
-                              ? const Icon(
-                                  Icons.check,
-                                  size: 16,
-                                  color: Colors.white,
-                                )
-                              : null,
-                        ),
-                        const SizedBox(width: 16),
-                        // Model info
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                displayName,
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                  color: isSelected
-                                      ? Colors.blue[700]
-                                      : Colors.black87,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                fileSize,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[600],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        // Info icon at far right
-                        GestureDetector(
-                          onTap: () => _showModelInfo(context, variant),
-                          behavior: HitTestBehavior.opaque,
-                          child: Padding(
-                            padding: const EdgeInsets.only(left: 8),
-                            child: Icon(
-                              Icons.info_outline,
-                              size: 20,
-                              color: Colors.blue[700],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+        else if (_downloadedModels.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(16.0),
+            decoration: BoxDecoration(
+              color: Colors.orange[50],
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.orange[200]!),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, color: Colors.orange[700]),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'No downloaded models available. Please download models in step 1.',
+                    style: TextStyle(color: Colors.orange[700], fontSize: 14),
                   ),
                 ),
-              ),
-            );
-          }),
+              ],
+            ),
+          )
+        else
+          LayoutBuilder(
+            builder: (context, constraints) {
+              // Calculate max height (25% of screen height, clamped between 200-400px)
+              final screenHeight = MediaQuery.of(context).size.height;
+              final maxListHeight = (screenHeight * 0.25).clamp(200.0, 400.0);
+
+              // Estimate height per item (approximately 80px per item including margins)
+              const estimatedItemHeight = 80.0;
+              final estimatedTotalHeight =
+                  _downloadedModels.length * estimatedItemHeight;
+
+              // Determine if scrolling is needed
+              final needsScrolling = estimatedTotalHeight > maxListHeight;
+
+              return ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: maxListHeight,
+                  minHeight: 0,
+                ),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  physics: needsScrolling
+                      ? const AlwaysScrollableScrollPhysics()
+                      : const NeverScrollableScrollPhysics(),
+                  itemCount: _downloadedModels.length,
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(height: 6),
+                  itemBuilder: (context, index) {
+                    final variant = _downloadedModels[index];
+                    final isSelected = _selectedModel == variant;
+                    final displayName = variant.displayName;
+                    final fileSize = variant.fileSize;
+
+                    return Container(
+                      decoration: BoxDecoration(
+                        color: isSelected ? Colors.blue[50] : Colors.grey[50],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isSelected
+                              ? Colors.blue[300]!
+                              : Colors.grey[300]!,
+                          width: isSelected ? 2 : 1,
+                        ),
+                      ),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () => _selectModel(variant),
+                          borderRadius: BorderRadius.circular(12),
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                            child: Row(
+                              children: [
+                                // Radio button
+                                Container(
+                                  width: 24,
+                                  height: 24,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: isSelected
+                                          ? Colors.blue[700]!
+                                          : Colors.grey[400]!,
+                                      width: 2,
+                                    ),
+                                    color: isSelected
+                                        ? Colors.blue[700]
+                                        : Colors.transparent,
+                                  ),
+                                  child: isSelected
+                                      ? const Icon(
+                                          Icons.check,
+                                          size: 16,
+                                          color: Colors.white,
+                                        )
+                                      : null,
+                                ),
+                                const SizedBox(width: 16),
+                                // Model info
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        displayName,
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                          color: isSelected
+                                              ? Colors.blue[700]
+                                              : Colors.black87,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        fileSize,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey[600],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                // Info icon at far right
+                                GestureDetector(
+                                  onTap: () => _showModelInfo(context, variant),
+                                  behavior: HitTestBehavior.opaque,
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(left: 8),
+                                    child: Icon(
+                                      Icons.info_outline,
+                                      size: 20,
+                                      color: Colors.blue[700],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              );
+            },
+          ),
 
         // Footer with Save button
         Padding(
