@@ -691,7 +691,10 @@ class SherpaOnnxSTTHelper {
         feat: FeatureConfig(sampleRate: 16000),
       );
 
-      await Future.delayed(const Duration(milliseconds: 50));
+      // Yield control multiple times before creating recognizer (this is the heavy operation)
+      await Future.delayed(const Duration(milliseconds: 100));
+      await Future.delayed(Duration.zero);
+      await Future.delayed(Duration.zero);
 
       print(
         '[sherpa-onxx-sst] initializeRecognizerByName: Creating OfflineRecognizer (Paraformer)...',
@@ -700,6 +703,10 @@ class SherpaOnnxSTTHelper {
       print(
         '[sherpa-onxx-sst] initializeRecognizerByName: Recognizer created successfully',
       );
+      
+      // Yield after creation to allow UI to update
+      await Future.delayed(Duration.zero);
+      
       return recognizer;
     }
 
@@ -874,22 +881,21 @@ class SherpaOnnxSTTHelper {
       '[sherpa-onxx-sst] transcribeAudio: onPartialResult provided=${onPartialResult != null}',
     );
 
-    final audioFile = File(audioPath);
-    if (!await audioFile.exists()) {
-      throw Exception('Audio file not found: $audioPath');
-    }
+    // Read audio file in an isolate to avoid blocking UI
+    print('[sherpa-onxx-sst] transcribeAudio: Reading audio file in isolate...');
+    final audioBytes = await _readAudioFileInIsolate(audioPath);
+    print(
+      '[sherpa-onxx-sst] transcribeAudio: Audio file read, size=${audioBytes.length} bytes',
+    );
+
+    // Yield control to UI thread after file reading
+    await Future.delayed(Duration.zero);
 
     // Create offline stream for transcription
     final stream = recognizer.createStream();
     print('[sherpa-onxx-sst] transcribeAudio: Stream created');
 
     try {
-      // Read audio file and feed to recognizer
-      final audioBytes = await audioFile.readAsBytes();
-      print(
-        '[sherpa-onxx-sst] transcribeAudio: Audio file read, size=${audioBytes.length} bytes',
-      );
-
       // Process audio in chunks (16kHz, 16-bit, mono = 32000 bytes per second)
       // 100ms chunks = 3200 bytes per chunk
       const chunkSize = 3200; // 100ms chunks
@@ -898,51 +904,77 @@ class SherpaOnnxSTTHelper {
         '[sherpa-onxx-sst] transcribeAudio: Processing $totalChunks chunks',
       );
 
-      int chunkCount = 0;
+      // Process audio in batches to reduce isolate overhead
+      // Batch size: 5 chunks per isolate call
+      const batchSize = 5;
+      final chunks = <List<int>>[];
       for (int i = 0; i < audioBytes.length; i += chunkSize) {
         final end = (i + chunkSize < audioBytes.length)
             ? i + chunkSize
             : audioBytes.length;
-        final chunk = audioBytes.sublist(i, end);
+        chunks.add(audioBytes.sublist(i, end));
+      }
 
-        stream.acceptWaveform(
-          samples: _bytesToSamples(chunk),
-          sampleRate: 16000,
-        );
+      int chunkCount = 0;
+      for (int batchStart = 0; batchStart < chunks.length; batchStart += batchSize) {
+        final batchEnd = (batchStart + batchSize < chunks.length)
+            ? batchStart + batchSize
+            : chunks.length;
+        final batch = chunks.sublist(batchStart, batchEnd);
 
-        chunkCount++;
+        // Convert batch of chunks to samples in an isolate
+        final samplesBatch = await _bytesToSamplesBatchInIsolate(batch);
 
-        // Yield control to UI thread periodically to prevent UI lockup
-        // Yield every 5 chunks (~500ms) to keep UI responsive
-        if (chunkCount % 5 == 0) {
+        // Yield control after batch conversion
+        await Future.delayed(Duration.zero);
+
+        // Feed each sample batch to recognizer
+        for (final samples in samplesBatch) {
+          stream.acceptWaveform(
+            samples: samples,
+            sampleRate: 16000,
+          );
+
+          chunkCount++;
+
+          // Yield control to UI thread after every chunk to keep UI responsive
           await Future.delayed(Duration.zero);
-        }
 
-        // Get partial results periodically (every 10 chunks = ~1 second of audio)
-        if (onPartialResult != null && chunkCount % 10 == 0) {
-          try {
-            recognizer.decode(stream);
-            final partialResult = recognizer.getResult(stream);
-            if (partialResult.text.isNotEmpty) {
-              print(
-                '[sherpa-onxx-sst] transcribeAudio: Partial result: "${partialResult.text}"',
-              );
-              // Yield control before calling callback to ensure UI updates
+          // Get partial results periodically (every 10 chunks = ~1 second of audio)
+          if (onPartialResult != null && chunkCount % 10 == 0) {
+            try {
+              // Yield before decode to ensure UI updates
               await Future.delayed(Duration.zero);
-              onPartialResult(partialResult.text);
+              recognizer.decode(stream);
+              final partialResult = recognizer.getResult(stream);
+              if (partialResult.text.isNotEmpty) {
+                print(
+                  '[sherpa-onxx-sst] transcribeAudio: Partial result: "${partialResult.text}"',
+                );
+                // Yield control before calling callback to ensure UI updates
+                await Future.delayed(Duration.zero);
+                onPartialResult(partialResult.text);
+              }
+            } catch (e) {
+              // Ignore errors for partial results
+              print(
+                '[sherpa-onxx-sst] transcribeAudio: Error getting partial result: $e',
+              );
             }
-          } catch (e) {
-            // Ignore errors for partial results
-            print(
-              '[sherpa-onxx-sst] transcribeAudio: Error getting partial result: $e',
-            );
           }
         }
+
+        // Yield control after processing each batch
+        await Future.delayed(Duration.zero);
       }
 
       print(
         '[sherpa-onxx-sst] transcribeAudio: All chunks processed, getting final result...',
       );
+      
+      // Yield before final decode
+      await Future.delayed(Duration.zero);
+      
       // Input finished, decode and get final result
       recognizer.decode(stream);
       final result = recognizer.getResult(stream);
@@ -956,20 +988,82 @@ class SherpaOnnxSTTHelper {
     }
   }
 
-  /// Convert bytes to float samples (16-bit PCM to float32)
-  static Float32List _bytesToSamples(List<int> bytes) {
-    final sampleCount = bytes.length ~/ 2;
-    final samples = Float32List(sampleCount);
-    for (int i = 0; i < bytes.length - 1; i += 2) {
-      // Combine two bytes into a 16-bit signed integer
-      final sample = (bytes[i] | (bytes[i + 1] << 8));
-      // Convert to signed 16-bit
-      final signedSample = sample > 32767 ? sample - 65536 : sample;
-      // Normalize to [-1.0, 1.0]
-      samples[i ~/ 2] = signedSample / 32768.0;
+  /// Read audio file in an isolate to avoid blocking UI
+  static Future<Uint8List> _readAudioFileInIsolate(String audioPath) async {
+    final receivePort = ReceivePort();
+
+    await Isolate.spawn(_readAudioFileIsolate, {
+      'sendPort': receivePort.sendPort,
+      'audioPath': audioPath,
+    });
+
+    final result = await receivePort.first;
+    if (result is Exception) {
+      throw result;
     }
-    return samples;
+    return result as Uint8List;
   }
+
+  /// Isolate entry point for reading audio file
+  static void _readAudioFileIsolate(Map<String, dynamic> message) {
+    final sendPort = message['sendPort'] as SendPort;
+    final audioPath = message['audioPath'] as String;
+
+    try {
+      final audioFile = File(audioPath);
+      if (!audioFile.existsSync()) {
+        sendPort.send(Exception('Audio file not found: $audioPath'));
+        return;
+      }
+      final audioBytes = audioFile.readAsBytesSync();
+      sendPort.send(audioBytes);
+    } catch (e) {
+      sendPort.send(Exception('Error reading audio file: $e'));
+    }
+  }
+
+  /// Convert bytes to float samples in an isolate to avoid blocking UI
+  /// Batches multiple chunks to reduce isolate spawn overhead
+  static Future<List<Float32List>> _bytesToSamplesBatchInIsolate(
+      List<List<int>> chunks) async {
+    final receivePort = ReceivePort();
+
+    await Isolate.spawn(_bytesToSamplesBatchIsolate, {
+      'sendPort': receivePort.sendPort,
+      'chunks': chunks,
+    });
+
+    final result = await receivePort.first as List<Float32List>;
+    return result;
+  }
+
+  /// Isolate entry point for batch bytes to samples conversion
+  static void _bytesToSamplesBatchIsolate(Map<String, dynamic> message) {
+    final sendPort = message['sendPort'] as SendPort;
+    final chunks = message['chunks'] as List<List<int>>;
+
+    try {
+      final results = <Float32List>[];
+      for (final bytes in chunks) {
+        final sampleCount = bytes.length ~/ 2;
+        final samples = Float32List(sampleCount);
+        for (int i = 0; i < bytes.length - 1; i += 2) {
+          // Combine two bytes into a 16-bit signed integer
+          final sample = (bytes[i] | (bytes[i + 1] << 8));
+          // Convert to signed 16-bit
+          final signedSample = sample > 32767 ? sample - 65536 : sample;
+          // Normalize to [-1.0, 1.0]
+          samples[i ~/ 2] = signedSample / 32768.0;
+        }
+        results.add(samples);
+      }
+      sendPort.send(results);
+    } catch (e) {
+      // On error, return empty lists
+      sendPort.send(List<Float32List>.filled(chunks.length, Float32List(0)));
+    }
+  }
+
 
   /// Get the size of a remote file via HEAD request
   static Future<int?> _getRemoteFileSize(String url) async {

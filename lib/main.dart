@@ -182,11 +182,9 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
     _flutterTts = FlutterTts();
 
     // Set language based on selected language
+    // Pass the full language code (e.g., 'zh-CN') to let getTtsLanguageCode handle normalization
     if (selectedLang != null) {
-      final langCode = selectedLang!.code.contains('-')
-          ? selectedLang!.code.split('-').first
-          : selectedLang!.code;
-      await _flutterTts?.setLanguage(_getTtsLanguageCode(langCode));
+      await _flutterTts?.setLanguage(_getTtsLanguageCode(selectedLang!.code));
     }
 
     // Set speech rate and volume
@@ -227,10 +225,7 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
 
     // Update language if selected language changed
     if (selectedLang != null) {
-      final langCode = selectedLang!.code.contains('-')
-          ? selectedLang!.code.split('-').first
-          : selectedLang!.code;
-      await _flutterTts?.setLanguage(_getTtsLanguageCode(langCode));
+      await _flutterTts?.setLanguage(_getTtsLanguageCode(selectedLang!.code));
     }
 
     setState(() {
@@ -939,6 +934,39 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
                     'Model: ${selectedModel!.displayName} (${selectedModel!.fileSize}) | Language: ${selectedLang!.name} (${selectedLang!.code})',
                     style: const TextStyle(fontSize: 14),
                     textAlign: TextAlign.center,
+                  ),
+                const SizedBox(height: 20),
+                // TTS Language Code display
+                if (selectedLang != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12.0,
+                      vertical: 8.0,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.grey[300]!),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.volume_up,
+                          size: 16,
+                          color: Colors.grey,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'TTS Language: ${_getTtsLanguageCode(selectedLang!.code)}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[700],
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 const SizedBox(height: 20),
                 // STT Button

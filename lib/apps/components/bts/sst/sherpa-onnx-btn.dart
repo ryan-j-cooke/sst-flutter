@@ -66,8 +66,8 @@ class SherpaOnnxSTTButton extends StatefulWidget {
   final bool expanded;
   final Function(String transcribedText, int percentage)? onSpeechTranscribed;
   final Function(bool state)? onStateChanged;
-  final SherpaModelType? sherpaModel; // Null for custom models
-  final String? customModelName; // Used when sherpaModel is null
+  final SherpaModelType? sherpaModel;
+  final String? customModelName;
 
   const SherpaOnnxSTTButton({
     Key? key,
