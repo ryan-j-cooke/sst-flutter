@@ -657,7 +657,8 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
       _statusMessage = 'Transcription complete (${percentage}% match)';
     });
 
-    // TTS is only invoked manually by tapping the transcription area
+    // Automatically speak the transcribed text
+    _speakText(transcribedText);
   }
 
   @override
