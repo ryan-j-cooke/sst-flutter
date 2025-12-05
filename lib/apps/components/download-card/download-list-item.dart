@@ -246,12 +246,28 @@ class DownloadListItem extends StatelessWidget {
     final output = <String>[];
     bool isComplete = false;
     String? error;
+    int downloadedBytes = 0;
+    int? totalBytes;
+    double extractionProgress = 0.0;
+    String? extractionStatus;
+    bool isDownloading = false;
+    bool isExtracting = false;
+
+    print(
+      '[download-list-item] _showDownloadDialog: Starting download dialog for ${modelInfo.displayName}',
+    );
+
+    // Store setState function to use in callbacks
+    void Function(VoidCallback)? dialogSetState;
 
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => StatefulBuilder(
+      builder: (dialogContext) => StatefulBuilder(
         builder: (context, setState) {
+          // Capture setState for use in async callbacks
+          dialogSetState = setState;
+
           return AlertDialog(
             title: Text('Downloading: ${modelInfo.displayName}'),
             content: SizedBox(
@@ -273,6 +289,41 @@ class DownloadListItem extends StatelessWidget {
                       size: 48,
                     ),
                   const SizedBox(height: 16),
+                  // Download progress
+                  if (isDownloading && totalBytes != null) ...[
+                    LinearProgressIndicator(
+                      value: downloadedBytes / totalBytes!,
+                      backgroundColor: Colors.grey[300],
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${(downloadedBytes / 1024 / 1024).toStringAsFixed(2)} MB / ${(totalBytes! / 1024 / 1024).toStringAsFixed(2)} MB (${(downloadedBytes / totalBytes! * 100).toStringAsFixed(1)}%)',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  // Extraction progress
+                  if (isExtracting) ...[
+                    LinearProgressIndicator(
+                      value: extractionProgress / 100.0,
+                      backgroundColor: Colors.grey[300],
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      extractionStatus ?? 'Extracting...',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.orange,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                   SizedBox(
                     height: 200,
                     child: SingleChildScrollView(
@@ -293,7 +344,7 @@ class DownloadListItem extends StatelessWidget {
             actions: [
               TextButton(
                 onPressed: isComplete || error != null
-                    ? () => Navigator.pop(context)
+                    ? () => Navigator.pop(dialogContext)
                     : null,
                 child: const Text('Close'),
               ),
@@ -304,46 +355,76 @@ class DownloadListItem extends StatelessWidget {
     );
 
     try {
+      print('[download-list-item] _showDownloadDialog: Getting directories');
       final documentsDir = await getApplicationDocumentsDirectory();
       final modelDir =
           '${documentsDir.path}/sherpa_onnx_models/${modelInfo.modelName}';
 
+      print(
+        '[download-list-item] _showDownloadDialog: Model directory: $modelDir',
+      );
       await Directory(modelDir).create(recursive: true);
 
+      print('[download-list-item] _showDownloadDialog: Starting download...');
       await SherpaOnnxSTTHelper.downloadModelByName(
         modelInfo.modelName,
         modelDir,
         displayName: modelInfo.displayName,
         onProgress: (downloaded, total) {
-          if (context.mounted) {
+          print(
+            '[download-list-item] _showDownloadDialog: onProgress callback - downloaded: $downloaded, total: $total',
+          );
+          if (context.mounted && dialogSetState != null) {
+            downloadedBytes = downloaded;
+            totalBytes = total;
+            isDownloading = true;
             final percent = total != null
                 ? (downloaded / total * 100).toStringAsFixed(1)
                 : '?';
-            output.add(
-              'Downloaded: ${(downloaded / 1024 / 1024).toStringAsFixed(2)} MB / ${total != null ? (total / 1024 / 1024).toStringAsFixed(2) : "?"} MB ($percent%)',
-            );
-            (context as Element).markNeedsBuild();
+            final logMsg =
+                'Downloaded: ${(downloaded / 1024 / 1024).toStringAsFixed(2)} MB / ${total != null ? (total / 1024 / 1024).toStringAsFixed(2) : "?"} MB ($percent%)';
+            print('[download-list-item] _showDownloadDialog: $logMsg');
+            output.add(logMsg);
+            dialogSetState!(() {});
           }
         },
         onExtractionProgress: (progress, status) {
-          if (context.mounted) {
-            output.add('Extraction: ${progress.toStringAsFixed(1)}% - $status');
-            (context as Element).markNeedsBuild();
+          print(
+            '[download-list-item] _showDownloadDialog: onExtractionProgress callback - progress: $progress, status: $status',
+          );
+          if (context.mounted && dialogSetState != null) {
+            isDownloading = false;
+            isExtracting = true;
+            extractionProgress = progress;
+            extractionStatus = status;
+            final logMsg =
+                'Extraction: ${progress.toStringAsFixed(1)}% - $status';
+            print('[download-list-item] _showDownloadDialog: $logMsg');
+            output.add(logMsg);
+            dialogSetState!(() {});
           }
         },
       );
 
-      if (context.mounted) {
-        output.add('✓ Download and extraction complete!');
+      if (context.mounted && dialogSetState != null) {
+        print(
+          '[download-list-item] _showDownloadDialog: Download and extraction complete',
+        );
+        isDownloading = false;
+        isExtracting = false;
         isComplete = true;
-        (context as Element).markNeedsBuild();
+        output.add('✓ Download and extraction complete!');
+        dialogSetState!(() {});
         onRefreshStatus?.call();
       }
     } catch (e) {
-      if (context.mounted) {
+      print('[download-list-item] _showDownloadDialog: Error occurred: $e');
+      if (context.mounted && dialogSetState != null) {
+        isDownloading = false;
+        isExtracting = false;
         error = e.toString();
         output.add('✗ Error: $e');
-        (context as Element).markNeedsBuild();
+        dialogSetState!(() {});
       }
     }
   }
