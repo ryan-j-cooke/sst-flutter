@@ -348,12 +348,16 @@ class DownloadListItem extends StatelessWidget {
                     IconButton(
                       icon: Icon(
                         modelInfo.hasCompressedFile
-                            ? Icons.folder_zip
+                            ? Icons.unarchive
                             : Icons.download,
                         size: 24,
                       ),
                       onPressed: isDownloaded ? null : onDownload,
-                      color: isDownloaded ? Colors.grey[400] : Colors.blue[700],
+                      color: isDownloaded
+                          ? Colors.grey[400]
+                          : (modelInfo.hasCompressedFile
+                                ? Colors.orange[700]
+                                : Colors.blue[700]),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(
                         minWidth: 32,

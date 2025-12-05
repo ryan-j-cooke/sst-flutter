@@ -111,13 +111,26 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
     // Get all model names (both enum and custom) for existence checks
     final allModelNames = _allModelVariants.map((v) => v.modelName).toList();
 
-    // Run model existence checks in an isolate to avoid blocking UI
-    final results = await _checkModelsExistInIsolateByName(allModelNames);
+    // Check model existence using the same method as debug (ensures consistency)
+    // Run checks in parallel to avoid blocking UI
+    final modelExistenceChecks = await Future.wait(
+      allModelNames.map((modelName) async {
+        final exists = await SherpaOnnxSTTHelper.modelExistsByName(modelName);
+        return MapEntry(modelName, exists);
+      }),
+    );
+    final modelFilesExist = Map<String, bool>.fromEntries(modelExistenceChecks);
 
-    // Extract results from isolate response
-    final modelFilesExist =
-        results['modelFilesExist'] as Map<String, bool>? ?? {};
-    final tarBz2Exists = results['tarBz2Exists'] as Map<String, bool>? ?? {};
+    // Check for .tar.bz2 files in parallel
+    final tempDir = await getTemporaryDirectory();
+    final tarBz2Checks = await Future.wait(
+      allModelNames.map((modelName) async {
+        final tarBz2File = File('${tempDir.path}/$modelName.tar.bz2');
+        final exists = await tarBz2File.exists();
+        return MapEntry(modelName, exists);
+      }),
+    );
+    final tarBz2Exists = Map<String, bool>.fromEntries(tarBz2Checks);
 
     // Update model infos with results from isolate (for all variants)
     for (final variant in _allModelVariants) {
@@ -139,9 +152,23 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
       );
 
       // Log status for debugging
-      if (tarBz2ExistsForModel && !modelFilesExistForModel) {
+      print(
+        '[download-card] _initializeModels: Model=${variant.displayName} (${modelName})',
+      );
+      print(
+        '[download-card] _initializeModels: modelFilesExistForModel=$modelFilesExistForModel, tarBz2ExistsForModel=$tarBz2ExistsForModel',
+      );
+      if (modelFilesExistForModel) {
+        print(
+          '[download-card] _initializeModels: ✓ Model ${variant.displayName} is downloaded and ready',
+        );
+      } else if (tarBz2ExistsForModel && !modelFilesExistForModel) {
         print(
           '[download-card] _initializeModels: Model ${variant.displayName} has .tar.bz2 file but model files missing - will extract on download',
+        );
+      } else {
+        print(
+          '[download-card] _initializeModels: ✗ Model ${variant.displayName} is not downloaded',
         );
       }
     }
@@ -223,6 +250,18 @@ class _ModelDownloadCardState extends State<ModelDownloadCard> {
             decoderExists &&
             tokensExists &&
             (isWhisperModel || joinerExists);
+
+        print('[download-card] _checkModelsExistIsolate: Model=$modelName');
+        print(
+          '[download-card] _checkModelsExistIsolate: encoderExists=$encoderExists, decoderExists=$decoderExists, joinerExists=$joinerExists, tokensExists=$tokensExists',
+        );
+        print(
+          '[download-card] _checkModelsExistIsolate: isWhisperModel=$isWhisperModel',
+        );
+        print(
+          '[download-card] _checkModelsExistIsolate: modelFilesExist=$modelFilesExist',
+        );
+
         results[modelName] = modelFilesExist;
 
         // Also check if .tar.bz2 file exists (for cases where download completed but extraction didn't)

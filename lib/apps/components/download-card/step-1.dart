@@ -1,7 +1,6 @@
 import '../typeography/h3.dart';
 import './download-list-item.dart';
 import 'package:flutter/material.dart';
-import 'package:stttest/utils/sherpa-onxx-sst.dart';
 
 /// Step 1 Content Widget
 ///
@@ -38,6 +37,23 @@ class Step1Content extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Sort models: downloaded (or has compressed file) first, then others
+    final sortedModels = modelInfos.values.toList()
+      ..sort((a, b) {
+        // Check if model is downloaded or has compressed file
+        final aIsDownloaded =
+            a.status == ModelDownloadStatus.downloaded || a.hasCompressedFile;
+        final bIsDownloaded =
+            b.status == ModelDownloadStatus.downloaded || b.hasCompressedFile;
+
+        // Downloaded models come first
+        if (aIsDownloaded && !bIsDownloaded) return -1;
+        if (!aIsDownloaded && bIsDownloaded) return 1;
+
+        // If both have same status, maintain original order (by display name)
+        return a.displayName.compareTo(b.displayName);
+      });
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -65,18 +81,50 @@ class Step1Content extends StatelessWidget {
         ),
         const SizedBox(height: 16),
 
-        ...modelInfos.values.map((modelInfo) {
-          return DownloadListItem(
-            modelInfo: modelInfo,
-            fileSizeText: getFileSizeText(modelInfo),
-            onDownload: () => onDownloadModel(modelInfo),
-            onCancel: () => onCancelDownload(modelInfo),
-            onDelete: () => onDeleteModel(modelInfo),
-            onRefreshStatus: onRefreshStatus != null
-                ? () => onRefreshStatus!(modelInfo)
-                : null,
-          );
-        }),
+        // Scrollable models list with auto height (up to max)
+        LayoutBuilder(
+          builder: (context, constraints) {
+            // Calculate max height (25% of screen height, clamped between 200-400px)
+            final screenHeight = MediaQuery.of(context).size.height;
+            final maxListHeight = (screenHeight * 0.25).clamp(200.0, 400.0);
+
+            // Estimate height per item (approximately 80px per item including margins)
+            const estimatedItemHeight = 80.0;
+            final estimatedTotalHeight =
+                sortedModels.length * estimatedItemHeight;
+
+            // Determine if scrolling is needed
+            final needsScrolling = estimatedTotalHeight > maxListHeight;
+
+            return ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: maxListHeight,
+                minHeight: 0,
+              ),
+              child: ListView.separated(
+                shrinkWrap: true,
+                physics: needsScrolling
+                    ? const AlwaysScrollableScrollPhysics()
+                    : const NeverScrollableScrollPhysics(),
+                itemCount: sortedModels.length,
+                separatorBuilder: (context, index) => const SizedBox(height: 0),
+                itemBuilder: (context, index) {
+                  final modelInfo = sortedModels[index];
+                  return DownloadListItem(
+                    modelInfo: modelInfo,
+                    fileSizeText: getFileSizeText(modelInfo),
+                    onDownload: () => onDownloadModel(modelInfo),
+                    onCancel: () => onCancelDownload(modelInfo),
+                    onDelete: () => onDeleteModel(modelInfo),
+                    onRefreshStatus: onRefreshStatus != null
+                        ? () => onRefreshStatus!(modelInfo)
+                        : null,
+                  );
+                },
+              ),
+            );
+          },
+        ),
         // Footer with Download All and Next buttons
         Padding(
           padding: const EdgeInsets.only(top: 16.0),
