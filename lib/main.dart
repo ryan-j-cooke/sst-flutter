@@ -403,6 +403,8 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
   }
 
   Future<void> _initializeSherpa() async {
+    // Yield control immediately to allow UI to update
+    await Future.delayed(Duration.zero);
     print(
       '[main.dart] _initializeSherpa: Starting, selectedModel=${selectedModel?.displayName}',
     );
@@ -517,14 +519,32 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
 
     if (result == true && mounted && selectedLang != null) {
       // Model downloaded and saved (step-2 saves via TutorService)
-      // Reload the saved model preference
+      // Reload the saved model preference (check both enum and custom models)
       final savedModel = await TutorService.getModelPriority(normalizedCode);
+      final savedModelName = await TutorService.getModelPriorityName(
+        normalizedCode,
+      );
+
+      print(
+        '[main.dart] _showModelDownloadDialogForLanguage: Reloading saved model - savedModel=${savedModel?.displayName}, savedModelName=$savedModelName',
+      );
+
       if (savedModel != null) {
-        selectedModel = savedModel;
-        selectedCustomModelName = null;
+        // Enum model was saved
+        setState(() {
+          selectedModel = savedModel;
+          selectedCustomModelName = null;
+        });
+        await _initializeSherpa();
+      } else if (savedModelName != null) {
+        // Custom model was saved
+        setState(() {
+          selectedModel = null;
+          selectedCustomModelName = savedModelName;
+        });
         await _initializeSherpa();
       } else {
-        // Get first available enum model as fallback
+        // No saved model, get first available enum model as fallback
         final allModelsForLang = SherpaModelDictionary.getModelsForLanguage(
           normalizedCode,
         );
@@ -534,8 +554,10 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
             .toList();
         if (enumModelsForLang.isNotEmpty) {
           // Use first available model
-          selectedModel = enumModelsForLang.first;
-          selectedCustomModelName = null;
+          setState(() {
+            selectedModel = enumModelsForLang.first;
+            selectedCustomModelName = null;
+          });
           await TutorService.saveModelPriority(
             normalizedCode,
             enumModelsForLang.first,
@@ -1002,7 +1024,9 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
                         ),
                       ),
                       Text(
-                        selectedModel?.displayName ?? 'na',
+                        selectedModel?.displayName ??
+                            selectedCustomModelName ??
+                            'na',
                         style: TextStyle(
                           fontSize: 12,
                           color: Colors.grey[700],
@@ -1034,6 +1058,9 @@ class _SpeechTestPageState extends State<SpeechTestPage> {
                       );
                       return Center(
                         child: SherpaOnnxSTTButton(
+                          key: ValueKey(
+                            '${selectedModel?.modelName ?? selectedCustomModelName ?? 'none'}_${selectedLang?.code ?? 'en'}',
+                          ), // Force rebuild when model or language changes
                           languageCode: selectedLang?.code ?? 'en',
                           sherpaModel: selectedModel,
                           customModelName: selectedCustomModelName,

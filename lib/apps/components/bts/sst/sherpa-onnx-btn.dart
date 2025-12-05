@@ -197,8 +197,11 @@ class _SherpaOnnxSTTButtonState extends State<SherpaOnnxSTTButton>
       _isInitializing = true;
     });
 
-    // Yield control to UI thread to ensure loading indicator is shown
-    await Future.delayed(const Duration(milliseconds: 50));
+    // Yield control multiple times to ensure loading indicator is shown and UI updates
+    await Future.delayed(const Duration(milliseconds: 100));
+    await Future.microtask(() {});
+    await Future.delayed(Duration.zero);
+    await Future.microtask(() {});
 
     try {
       // Initialize recognizer using helper

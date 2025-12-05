@@ -673,8 +673,11 @@ class SherpaOnnxSTTHelper {
         throw Exception('Paraformer model files missing');
       }
 
-      // Yield control to UI thread
-      await Future.delayed(const Duration(milliseconds: 50));
+      // Yield control multiple times to ensure UI has time to update and show loading state
+      await Future.delayed(const Duration(milliseconds: 150));
+      await Future.microtask(() {});
+      await Future.delayed(Duration.zero);
+      await Future.microtask(() {});
 
       print(
         '[sherpa-onxx-sst] initializeRecognizerByName: All files exist, creating Paraformer recognizer config...',
@@ -691,20 +694,30 @@ class SherpaOnnxSTTHelper {
         feat: FeatureConfig(sampleRate: 16000),
       );
 
-      // Yield control multiple times before creating recognizer (this is the heavy operation)
-      await Future.delayed(const Duration(milliseconds: 100));
+      // Yield control multiple times before creating recognizer (this is the heavy blocking operation)
+      // Use microtask to ensure all pending UI updates are processed before blocking
+      await Future.delayed(const Duration(milliseconds: 200));
+      await Future.microtask(() {});
       await Future.delayed(Duration.zero);
+      await Future.microtask(() {});
       await Future.delayed(Duration.zero);
+      await Future.microtask(() {});
 
       print(
         '[sherpa-onxx-sst] initializeRecognizerByName: Creating OfflineRecognizer (Paraformer)...',
       );
+      
+      // Note: This is a blocking native operation, but we've yielded control multiple times
+      // and used microtasks to ensure UI updates are processed before blocking
       final recognizer = OfflineRecognizer(recognizerConfig);
+      
       print(
         '[sherpa-onxx-sst] initializeRecognizerByName: Recognizer created successfully',
       );
       
-      // Yield after creation to allow UI to update
+      // Yield after creation to allow UI to update immediately
+      await Future.microtask(() {});
+      await Future.delayed(Duration.zero);
       await Future.delayed(Duration.zero);
       
       return recognizer;
@@ -764,9 +777,11 @@ class SherpaOnnxSTTHelper {
       throw Exception('Model files missing');
     }
 
-    // Yield control to UI thread to allow loading indicator to show
-    // Use a small delay to ensure UI has time to update
-    await Future.delayed(const Duration(milliseconds: 50));
+    // Yield control multiple times to ensure UI has time to update and show loading state
+    await Future.delayed(const Duration(milliseconds: 150));
+    await Future.microtask(() {});
+    await Future.delayed(Duration.zero);
+    await Future.microtask(() {});
 
     print(
       '[sherpa-onxx-sst] initializeRecognizerByName: All files exist, creating recognizer config...',
@@ -798,19 +813,31 @@ class SherpaOnnxSTTHelper {
       feat: FeatureConfig(sampleRate: 16000),
     );
 
-    // Yield control again before creating recognizer (this is the heavy operation)
-    // This allows the UI to show the loading state before blocking
-    await Future.delayed(const Duration(milliseconds: 50));
+    // Yield control multiple times before creating recognizer (this is the heavy blocking operation)
+    // Use microtask to ensure all pending UI updates are processed before blocking
+    await Future.delayed(const Duration(milliseconds: 200));
+    await Future.microtask(() {});
+    await Future.delayed(Duration.zero);
+    await Future.microtask(() {});
+    await Future.delayed(Duration.zero);
+    await Future.microtask(() {});
 
     print(
       '[sherpa-onxx-sst] initializeRecognizerByName: Creating OfflineRecognizer...',
     );
     // Note: OfflineRecognizer creation must happen on main thread (native object)
-    // This is the blocking operation, but we've already shown loading state
+    // This is a blocking operation, but we've yielded control multiple times
+    // and used microtasks to ensure UI updates are processed before blocking
     final recognizer = OfflineRecognizer(recognizerConfig);
     print(
       '[sherpa-onxx-sst] initializeRecognizerByName: Recognizer created successfully',
     );
+    
+    // Yield after creation to allow UI to update immediately
+    await Future.microtask(() {});
+    await Future.delayed(Duration.zero);
+    await Future.delayed(Duration.zero);
+    
     return recognizer;
   }
 
